@@ -81,7 +81,9 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 ## Monitoring
 
-Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files. Speedtest Tracker records a daily test; Uptime Kuma requires its initial SQLite/admin setup in the UI before user-defined monitors can be added. Prometheus blackbox monitoring is already active independently.
+Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
+
+Generated Grafana, Speedtest Tracker, and Uptime Kuma credentials are stored only in `/srv/ai-node/secrets/*.env` and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 
 ## Backup and restore
 
@@ -104,4 +106,3 @@ Verify the target is truly a separate mounted filesystem. To restore, stop the s
 - Disk pressure: `disk-status.sh`; models are the first large, replaceable data to review.
 - RAM pressure: `free -h` and `docker stats --no-stream`. Avoid simultaneous Ollama, ComfyUI generation, and large builds.
 - Never commit `.env`, `secrets`, databases, logs, backups, model weights, or generated output. Docker-group membership is root-equivalent. Do not mount `/var/run/docker.sock` into untrusted workloads.
-
