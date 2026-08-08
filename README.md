@@ -21,7 +21,7 @@
 - `/srv/backups/local`: local configuration/state archives. This is the same SSD and is not disaster recovery.
 - `/srv/ai-node/secrets`: local environment files, mode `0700`/`0600`, ignored by Git.
 
-Persistent application data is under `/srv/ai-node/data` and is ignored by Git. Docker uses `unless-stopped` restart policies and starts at boot. JSON container logs rotate at 10 MiB with three files. Prometheus retains at most 30 days or 5 GB. Speedtest Tracker runs daily at 06:00 and retains 365 days.
+Persistent application data is under `/srv/ai-node/data` and is ignored by Git. Containers use `unless-stopped` restart policies. At boot, `ai-node-stack.service` waits for both the LAN and Tailscale addresses before reconciling Compose, preventing bound-port startup races. JSON container logs rotate at 10 MiB with three files. Prometheus retains at most 30 days or 5 GB. Speedtest Tracker runs daily at 06:00 and retains 365 days.
 
 ## Routine operation
 
@@ -45,6 +45,8 @@ docker compose --env-file .env -f compose/ai-node.yml logs --tail=100 SERVICE
 ```
 
 Use `sudo systemctl poweroff` for a planned host shutdown. Containers receive Docker's normal graceful stop before system power-off.
+
+The stack boot unit can be inspected or reconciled with `systemctl status ai-node-stack` and `sudo systemctl reload ai-node-stack`.
 
 Update pinned images and locally built services with `/srv/ai-node/scripts/update-stack.sh`. It validates Compose, pulls, rebuilds, restarts, and runs the health check. It deliberately does not delete old images or build cache; review space with `docker system df`, and prune only after confirming rollback images are no longer needed.
 
