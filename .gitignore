@@ -1,0 +1,15 @@
+.env
+secrets/*
+!secrets/.gitkeep
+data/
+logs/
+*.log
+*.db
+*.sqlite*
+backups/
+models/
+output/
+node_modules/
+__pycache__/
+.pytest_cache/
+

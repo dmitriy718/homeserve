@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: AI Node
+    orgId: 1
+    folder: AI Node
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana-dashboards
+
