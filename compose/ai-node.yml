@@ -54,7 +54,7 @@ services:
       - "${LAN_IP}:8090:8090"
       - "${TAILSCALE_IP}:8090:8090"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(http://127.0.0.1:8090/health, timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(\x27http://127.0.0.1:8090/health\x27, timeout=3)"]
       interval: 30s
       timeout: 10s
       retries: 5
