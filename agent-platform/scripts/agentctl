@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+base="${AGENT_GATEWAY_URL:-http://192.168.1.68:8090}"
+key_file="${AGENT_KEY_FILE:-/srv/ai-node/secrets/agent-gateway.env}"
+key="$(sed -n 's/^AGENT_GATEWAY_KEY=//p' "$key_file")"
+case "${1:-status}" in
+  status|doctor) curl -fsS -H "Authorization: Bearer $key" "$base/health"; echo; curl -fsS -H "Authorization: Bearer $key" "$base/tools"; echo ;;
+  tools) curl -fsS -H "Authorization: Bearer $key" "$base/openapi.json" ;;
+  *) echo "usage: agentctl {status|doctor|tools}" >&2; exit 2 ;;
+esac
