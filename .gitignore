@@ -13,3 +13,11 @@ node_modules/
 __pycache__/
 .pytest_cache/
 
+
+# Agent platform generated state
+agent-platform/workspaces/
+agent-platform/artifacts/
+agent-platform/cache/
+agent-platform/logs/
+agent-platform/secrets/
+secrets/agent-gateway.env

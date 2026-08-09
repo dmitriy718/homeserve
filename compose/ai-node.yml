@@ -34,6 +34,33 @@ services:
     mem_limit: 8g
     networks: [ai, monitoring]
 
+  agent-gateway:
+    <<: *common
+    build:
+      context: ../services/agent-gateway
+    image: local/ai-node-agent-gateway:1.0
+    container_name: ai-agent-gateway
+    user: "1000:1000"
+    env_file:
+      - ../secrets/agent-gateway.env
+    environment:
+      WORKSPACE_ROOT: /srv/agent-workspaces
+      ARTIFACT_ROOT: /srv/agent-artifacts
+    volumes:
+      - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
+      - /srv/ai-node/agent-platform/artifacts:/srv/agent-artifacts
+      - /srv/ai-node/agent-platform/cache:/srv/agent-cache
+    ports:
+      - "${LAN_IP}:8090:8090"
+      - "${TAILSCALE_IP}:8090:8090"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(http://127.0.0.1:8090/health, timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 512m
+    networks: [ai, dev]
+
   open-webui:
     <<: *common
     image: ghcr.io/open-webui/open-webui:v0.11.0
@@ -47,9 +74,11 @@ services:
       ENABLE_SIGNUP: "False"
       ENABLE_OPENAI_API: "False"
       ENABLE_OLLAMA_API: "True"
+      DEFAULT_MODEL_PARAMS: "{\"function_calling\":\"native\"}"
       WEBUI_NAME: homeserv AI
     volumes:
       - /srv/ai-node/data/open-webui:/app/backend/data
+      - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
     ports:
       - "${LAN_IP}:3000:8080"
       - "${TAILSCALE_IP}:3000:8080"
