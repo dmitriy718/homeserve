@@ -59,7 +59,7 @@ services:
       timeout: 10s
       retries: 5
     mem_limit: 512m
-    networks: [ai, dev]
+    networks: [ai, monitoring, dev]
 
   open-webui:
     <<: *common
