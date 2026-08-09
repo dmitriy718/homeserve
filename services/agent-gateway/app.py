@@ -1,10 +1,12 @@
 """Small, model-independent OpenAPI tool gateway for scoped agent workspaces."""
 import hashlib, os, shlex, subprocess, time, uuid, json, socket, ssl
+import asyncio
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 ROOT = Path(os.getenv("WORKSPACE_ROOT", "/srv/agent-workspaces")).resolve()
@@ -43,6 +45,54 @@ def health(): return {"status":"ok", "workspace_root":str(ROOT), "artifact_root"
 
 @app.get("/tools", operation_id="list_agent_tools")
 def tools(): return {"tools":["fs_list","fs_read","fs_write","fs_mkdir","fs_delete","fs_hash","shell_exec","http_security_check","tcp_probe","dns_lookup","tls_certificate"]}
+
+SERVICE_CHECKS = {
+    "ollama": "http://ollama:11434/api/tags",
+    "open-webui": "http://open-webui:8080/health",
+    "comfyui": "http://comfyui:8188/system_stats",
+    "embeddings": "http://embeddings:8080/health",
+    "prometheus": "http://prometheus:9090/-/ready",
+    "grafana": "http://grafana:3000/api/health",
+    "uptime-kuma": "http://uptime-kuma:3001/",
+    "agent-gateway": "http://127.0.0.1:8090/health",
+}
+
+def service_snapshot():
+    out=[]
+    for name,url in SERVICE_CHECKS.items():
+        started=time.time()
+        try:
+            r=urlopen(Request(url,headers={"User-Agent":"ai-node-transparency/1.0"}),timeout=3)
+            out.append({"service":name,"url":url,"status":"up","http_status":r.status,"latency_ms":round((time.time()-started)*1000,2)})
+        except Exception as e:
+            out.append({"service":name,"url":url,"status":"down","error":f"{type(e).__name__}: {e}","latency_ms":round((time.time()-started)*1000,2)})
+    return {"timestamp":time.time(),"services":out}
+
+@app.get("/transparency/services", operation_id="transparency_services")
+def transparency_services(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization); return service_snapshot()
+
+@app.get("/transparency/audit", operation_id="transparency_audit")
+def transparency_audit(limit: int = Query(100, ge=1, le=1000), x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization); p=ARTIFACTS/"agent-audit.jsonl"
+    if not p.exists(): return {"events":[]}
+    lines=p.read_text(errors="replace").splitlines()[-limit:]
+    return {"events":[json.loads(x) for x in lines if x.strip()]}
+
+@app.get("/transparency/events", operation_id="transparency_events")
+async def transparency_events(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization)
+    async def stream():
+        last=""
+        for _ in range(120):
+            snap=json.dumps(service_snapshot(),separators=(",",":"))
+            if snap != last: yield f"event: services\\ndata: {snap}\\n\\n"; last=snap
+            await asyncio.sleep(2)
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+@app.get("/transparency", response_class=HTMLResponse, include_in_schema=False)
+def transparency_dashboard():
+    return HTMLResponse("""<!doctype html><meta charset=utf-8><title>AI Node Transparency</title><style>body{font:15px system-ui;background:#101418;color:#e6edf3;max-width:1100px;margin:2rem auto;padding:0 1rem}table{width:100%;border-collapse:collapse}td,th{padding:.55rem;border-bottom:1px solid #30363d;text-align:left}.up{color:#3fb950}.down{color:#f85149}pre{white-space:pre-wrap;background:#161b22;padding:1rem;max-height:30rem;overflow:auto}button{padding:.5rem}</style><h1>AI Node Transparency</h1><p>Read-only live service health and agent activity. Token stays in this browser session.</p><input id=token type=password placeholder="Agent gateway token" size=42><button onclick=start()>Connect</button><h2>Services</h2><table><thead><tr><th>Service</th><th>Status</th><th>Latency</th><th>Endpoint</th></tr></thead><tbody id=services></tbody></table><h2>Recent agent events</h2><pre id=audit>Connect to load events.</pre><script>let h={};function start(){h={Authorization:'Bearer '+document.querySelector('#token').value};refresh();setInterval(refresh,5000)}async function refresh(){try{let s=await fetch('/transparency/services',{headers:h}).then(r=>r.json());services.innerHTML=s.services.map(x=>`<tr><td>${x.service}</td><td class=${x.status}>${x.status}</td><td>${x.latency_ms??'-'} ms</td><td>${x.url}</td></tr>`).join('');let a=await fetch('/transparency/audit?limit=100',{headers:h}).then(r=>r.json());audit.textContent=a.events.map(JSON.stringify).join('\\n')}catch(e){audit.textContent=e}}</script>""")
 
 @app.get("/fs/list", operation_id="fs_list")
 def fs_list(path: str = "", x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
