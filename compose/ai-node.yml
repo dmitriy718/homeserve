@@ -266,6 +266,8 @@ services:
     <<: *common
     image: lscr.io/linuxserver/speedtest-tracker:1.14.7
     container_name: monitor-speedtest
+    # LinuxServer's s6-overlay must remain PID 1.
+    init: false
     env_file:
       - ../secrets/speedtest.env
     environment:
