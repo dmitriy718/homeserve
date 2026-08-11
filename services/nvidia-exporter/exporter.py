@@ -10,11 +10,12 @@ def escape_label(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
-def metrics() -> str:
+def metrics() -> tuple[str, bool]:
     lines = [
         "# HELP nvidia_gpu_up Whether nvidia-smi returned GPU data.",
         "# TYPE nvidia_gpu_up gauge",
     ]
+    healthy = False
     try:
         result = subprocess.run(
             ["nvidia-smi", f"--query-gpu={QUERY}", "--format=csv,noheader,nounits"],
@@ -24,7 +25,8 @@ def metrics() -> str:
             timeout=10,
         )
         rows = list(csv.reader(io.StringIO(result.stdout)))
-        lines.append("nvidia_gpu_up 1")
+        healthy = bool(rows)
+        lines.append(f"nvidia_gpu_up {1 if healthy else 0}")
         definitions = [
             ("nvidia_gpu_utilization_percent", "GPU utilization percentage.", 2, 1.0),
             ("nvidia_gpu_memory_used_bytes", "GPU memory used in bytes.", 3, 1024 * 1024),
@@ -46,7 +48,7 @@ def metrics() -> str:
                     continue
     except Exception:
         lines.append("nvidia_gpu_up 0")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", healthy
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -54,8 +56,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in ("/", "/metrics", "/health"):
             self.send_error(404)
             return
-        body = metrics().encode()
-        self.send_response(200)
+        body_text, healthy = metrics()
+        body = body_text.encode()
+        self.send_response(200 if self.path != "/health" or healthy else 503)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -65,5 +68,5 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-ThreadingHTTPServer(("0.0.0.0", 9400), Handler).serve_forever()
-
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", 9400), Handler).serve_forever()

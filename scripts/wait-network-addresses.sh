@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=/dev/null
 source /srv/ai-node/.env
 
 for _ in $(seq 1 120); do
@@ -14,4 +15,3 @@ done
 
 echo "Timed out waiting for LAN=$LAN_IP and Tailscale=$TAILSCALE_IP" >&2
 exit 1
-

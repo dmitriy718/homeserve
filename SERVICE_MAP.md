@@ -18,4 +18,6 @@ Tailscale address: `100.65.105.46`
 | Speedtest Tracker | Daily Internet performance history | `monitor-speedtest` | 8765 | `http://192.168.1.68:8765` | `http://100.65.105.46:8765` | `/srv/ai-node/data/speedtest` | No | `/` |
 | Playwright | Disposable browser verification | profile-only `dev-playwright-test` | None | Not exposed | Not exposed | Image/config only | No | `test.js` exit status |
 
+Prometheus alert states are visible at `http://192.168.1.68:9091/alerts` and `http://100.65.105.46:9091/alerts`. Alerts are evaluated locally; no notification receiver is configured.
+
 The pre-existing Nextcloud, Wekan, and Prometheus-snap workloads were preserved and are not managed by this Compose project.

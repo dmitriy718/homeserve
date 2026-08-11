@@ -50,6 +50,14 @@ The stack boot unit can be inspected or reconciled with `systemctl status ai-nod
 
 Update pinned images and locally built services with `/srv/ai-node/scripts/update-stack.sh`. It validates Compose, pulls, rebuilds, restarts, and runs the health check. It deliberately does not delete old images or build cache; review space with `docker system df`, and prune only after confirming rollback images are no longer needed.
 
+Validate repository and deployment configuration without changing the running stack:
+
+```bash
+/srv/ai-node/scripts/validate-config.sh --strict
+```
+
+The August 2026 hardening and usefulness pass is recorded as [exactly 25 scoped improvements](docs/IMPROVEMENTS_2026-08-10.md).
+
 ## AI operation
 
 Ollama's API is `http://192.168.1.68:11434` (or the Tailscale address). List models with `docker exec ai-ollama ollama list`; add one deliberately with `docker exec ai-ollama ollama pull MODEL`. Check free SSD space first and avoid loading multiple large models on this 16 GB system.
@@ -83,13 +91,13 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 ## Monitoring
 
-Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
+Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, and failed GPU telemetry; inspect them at `http://192.168.1.68:9091/alerts`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
 
 Generated Grafana, Speedtest Tracker, and Uptime Kuma credentials are stored only in `/srv/ai-node/secrets/*.env` and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 
 ## Backup and restore
 
-Run `sudo /srv/ai-node/scripts/backup.sh`. It briefly pauses stateful web containers, archives configuration, secrets, databases, workflows, and `/srv/repos`, excludes Prometheus history and downloadable caches/models, writes a SHA-256 sidecar, and keeps 14 days of local archives.
+Run `sudo /srv/ai-node/scripts/backup.sh`. It briefly pauses stateful web containers, archives configuration, secrets, databases, workflows, and `/srv/repos`, excludes Prometheus history and downloadable caches/models, read-tests the archive, verifies a SHA-256 sidecar, and keeps 14 days of local archives. After installing and enabling `ai-node-backup.timer`, the same verified backup runs nightly around 03:30 with a randomized delay.
 
 For real disaster recovery, attach and mount an external disk or NAS, then run:
 

@@ -2,6 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -42,6 +45,7 @@ scrape_configs:
           - http://open-webui:8080/health
           - http://embeddings:8080/health
           - http://comfyui:8188/system_stats
+          - http://agent-gateway:8090/health
           - http://grafana:3000/api/health
           - http://uptime-kuma:3001/
           - http://speedtest-tracker/
@@ -66,4 +70,3 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
-

@@ -1,5 +1,5 @@
 """Small, model-independent OpenAPI tool gateway for scoped agent workspaces."""
-import hashlib, os, shlex, subprocess, time, uuid, json, socket, ssl
+import hashlib, hmac, os, subprocess, time, json, socket, ssl
 import asyncio
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -12,18 +12,29 @@ from pydantic import BaseModel, Field
 ROOT = Path(os.getenv("WORKSPACE_ROOT", "/srv/agent-workspaces")).resolve()
 ARTIFACTS = Path(os.getenv("ARTIFACT_ROOT", "/srv/agent-artifacts")).resolve()
 API_KEY = os.getenv("AGENT_GATEWAY_KEY", "")
+if len(API_KEY) < 32:
+    raise RuntimeError("AGENT_GATEWAY_KEY must be set to at least 32 characters")
 ROOT.mkdir(parents=True, exist_ok=True); ARTIFACTS.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="AI Node Agent Gateway", version="1.0.0", description="Scoped filesystem and shell tools for agent projects.")
+
+MAX_COMMAND_CHARS = 20_000
+MAX_WRITE_CHARS = 5_000_000
+MAX_AUDIT_BYTES = 10 * 1024 * 1024
 
 def audit(action: str, detail: dict | None = None):
     record = {"ts": time.time(), "action": action, "detail": detail or {}}
     try:
-        with (ARTIFACTS / "agent-audit.jsonl").open("a") as f: f.write(json.dumps(record, separators=(",", ":")) + "\n")
+        path = ARTIFACTS / "agent-audit.jsonl"
+        if path.exists() and path.stat().st_size >= MAX_AUDIT_BYTES:
+            rotated = ARTIFACTS / "agent-audit.jsonl.1"
+            rotated.unlink(missing_ok=True)
+            path.replace(rotated)
+        with path.open("a") as f: f.write(json.dumps(record, separators=(",", ":")) + "\n")
     except OSError: pass
 
 def auth(x_agent_key: Optional[str], authorization: Optional[str]):
     supplied = x_agent_key or (authorization.removeprefix("Bearer ") if authorization else "")
-    if API_KEY and supplied != API_KEY: raise HTTPException(401, "invalid agent gateway key")
+    if not hmac.compare_digest(supplied, API_KEY): raise HTTPException(401, "invalid agent gateway key")
 
 def safe(rel: str) -> Path:
     p = (ROOT / rel).resolve()
@@ -112,7 +123,12 @@ def fs_read(path: str, x_agent_key: Optional[str] = Header(None), authorization:
 
 @app.post("/fs/write", operation_id="fs_write")
 def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    auth(x_agent_key, authorization); audit("fs_write", {"path": req.path, "append": req.append}); p=safe(req.path); p.parent.mkdir(parents=True,exist_ok=True)
+    auth(x_agent_key, authorization)
+    p=safe(req.path)
+    existing_size = p.stat().st_size if req.append and p.exists() else 0
+    if len(req.content) > MAX_WRITE_CHARS or existing_size + len(req.content.encode()) > MAX_WRITE_CHARS:
+        raise HTTPException(413, "resulting file exceeds the 5,000,000-byte limit")
+    audit("fs_write", {"path": req.path, "append": req.append}); p.parent.mkdir(parents=True,exist_ok=True)
     mode="a" if req.append else "w"; p.open(mode).write(req.content)
     return {"path":req.path,"bytes":p.stat().st_size,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
 
@@ -134,7 +150,9 @@ def fs_hash(path: str, x_agent_key: Optional[str] = Header(None), authorization:
 
 @app.post("/shell/exec", operation_id="shell_exec")
 def shell_exec(req: ShellReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    auth(x_agent_key, authorization); audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
+    auth(x_agent_key, authorization)
+    if len(req.command) > MAX_COMMAND_CHARS: raise HTTPException(413, "command exceeds 20,000 characters")
+    audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
     started=time.time()
     try:
         r=subprocess.run(["bash","-lc",req.command],cwd=wd,text=True,capture_output=True,timeout=req.timeout_seconds,env={**os.environ,"AGENT_PROJECT":req.project})
