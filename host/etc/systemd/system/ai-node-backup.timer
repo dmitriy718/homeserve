@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly AI node backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=ai-node-backup.service
+
+[Install]
+WantedBy=timers.target

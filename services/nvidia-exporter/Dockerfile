@@ -6,8 +6,7 @@ RUN apt-get update \
  && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin exporter
 
 WORKDIR /app
-COPY exporter.py /app/exporter.py
+COPY --chmod=0644 exporter.py /app/exporter.py
 USER 10001:10001
 EXPOSE 9400
 CMD ["python3", "/app/exporter.py"]
-

@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
  && useradd --uid 1000 --gid 1000 --create-home embeddings
 
 WORKDIR /app
-COPY app.py /app/app.py
+COPY --chmod=0644 app.py /app/app.py
 USER 1000:1000
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

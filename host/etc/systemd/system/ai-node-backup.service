@@ -1,0 +1,12 @@
+[Unit]
+Description=Verified AI node configuration and state backup
+Requires=docker.service
+After=docker.service ai-node-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077

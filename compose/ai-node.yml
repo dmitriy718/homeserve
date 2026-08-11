@@ -2,6 +2,9 @@ name: ai-node
 
 x-common: &common
   restart: unless-stopped
+  init: true
+  pids_limit: 1024
+  stop_grace_period: 45s
   security_opt:
     - no-new-privileges:true
   logging:
@@ -41,6 +44,10 @@ services:
     image: local/ai-node-agent-gateway:1.0
     container_name: ai-agent-gateway
     user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
     env_file:
       - ../secrets/agent-gateway.env
     environment:
@@ -59,6 +66,7 @@ services:
       timeout: 10s
       retries: 5
     mem_limit: 512m
+    cpus: 2
     networks: [ai, monitoring, dev]
 
   open-webui:
@@ -101,6 +109,8 @@ services:
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       MODEL_CACHE: /models
       OMP_NUM_THREADS: "4"
+      MAX_EMBEDDING_INPUTS: "64"
+      MAX_EMBEDDING_CHARS: "50000"
     volumes:
       - /srv/models/embeddings:/models
     ports:
@@ -157,6 +167,7 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - /srv/ai-node/data/prometheus:/prometheus
     ports:
       - "${LAN_IP}:9091:9090"
@@ -185,6 +196,12 @@ services:
     ports:
       - "${LAN_IP}:3001:3000"
       - "${TAILSCALE_IP}:3001:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     mem_limit: 512m
     networks: [monitoring]
 
@@ -223,6 +240,13 @@ services:
     image: local/ai-node-nvidia-exporter:1.0
     container_name: monitor-nvidia-exporter
     gpus: all
+    cap_drop: [ALL]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9400/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     mem_limit: 128m
     networks: [monitoring]
 
@@ -283,4 +307,3 @@ networks:
     name: ai-node-monitoring
   dev:
     name: ai-node-dev
-

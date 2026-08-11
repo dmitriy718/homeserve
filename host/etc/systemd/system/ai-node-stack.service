@@ -3,6 +3,8 @@ Description=AI node Docker Compose stack
 Requires=docker.service
 Wants=network-online.target tailscaled.service
 After=docker.service network-online.target tailscaled.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -12,9 +14,12 @@ ExecStartPre=/srv/ai-node/scripts/wait-network-addresses.sh
 ExecStart=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml up -d --remove-orphans --force-recreate
 ExecStartPost=/srv/ai-node/scripts/wait-stack-healthy.sh
 ExecReload=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml up -d --remove-orphans
-ExecStop=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml stop --timeout 30
+ExecStop=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml stop --timeout 45
 TimeoutStartSec=420
-TimeoutStopSec=90
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=30
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

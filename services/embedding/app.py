@@ -7,6 +7,8 @@ from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 MODEL_CACHE = os.getenv("MODEL_CACHE", "/models")
+MAX_INPUTS = int(os.getenv("MAX_EMBEDDING_INPUTS", "64"))
+MAX_CHARS = int(os.getenv("MAX_EMBEDDING_CHARS", "50000"))
 model = SentenceTransformer(MODEL_NAME, device="cpu", cache_folder=MODEL_CACHE)
 
 app = FastAPI(title="AI Node Embeddings", version="1.0.0")
@@ -34,6 +36,10 @@ def embeddings(request: EmbeddingRequest):
     texts = [request.input] if isinstance(request.input, str) else request.input
     if not texts or any(not isinstance(text, str) or not text for text in texts):
         raise HTTPException(status_code=400, detail="input must contain non-empty text")
+    if len(texts) > MAX_INPUTS:
+        raise HTTPException(status_code=413, detail=f"at most {MAX_INPUTS} inputs are allowed")
+    if sum(len(text) for text in texts) > MAX_CHARS:
+        raise HTTPException(status_code=413, detail=f"input exceeds {MAX_CHARS} total characters")
     vectors = model.encode(texts, normalize_embeddings=True).tolist()
     data = [{"object": "embedding", "index": i, "embedding": vector} for i, vector in enumerate(vectors)]
     token_estimate = sum(max(1, len(text.split())) for text in texts)
@@ -43,4 +49,3 @@ def embeddings(request: EmbeddingRequest):
         "model": MODEL_NAME,
         "usage": {"prompt_tokens": token_estimate, "total_tokens": token_estimate},
     }
-

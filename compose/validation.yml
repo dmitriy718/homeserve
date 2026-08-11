@@ -1,0 +1,14 @@
+services:
+  agent-gateway:
+    env_file: !reset []
+    environment:
+      AGENT_GATEWAY_KEY: validation-only-key-000000000000000000000000
+  grafana:
+    env_file: !reset []
+    environment:
+      GF_SECURITY_ADMIN_USER: validation
+      GF_SECURITY_ADMIN_PASSWORD: validation-only-password
+  speedtest-tracker:
+    env_file: !reset []
+    environment:
+      APP_KEY: base64:dmFsaWRhdGlvbi1vbmx5LWtleS0wMDAwMDAwMA==

@@ -1,0 +1,56 @@
+groups:
+  - name: ai-node-health
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: "Target {{ $labels.instance }} has not been scrapeable for two minutes."
+
+      - alert: ServiceProbeFailed
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service or network probe failed"
+          description: "Blackbox probe {{ $labels.instance }} has failed for two minutes."
+
+      - alert: RootFilesystemNearlyFull
+        expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem is over 85% full"
+          description: "Free storage is low enough to threaten models, databases, or Docker updates."
+
+      - alert: HostMemoryPressure
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory usage is over 90%"
+          description: "Sustained memory pressure may trigger the OOM killer."
+
+      - alert: NvidiaGpuHot
+        expr: nvidia_gpu_temperature_celsius > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NVIDIA GPU temperature is high"
+          description: "GPU {{ $labels.gpu }} has remained above 85 C for five minutes."
+
+      - alert: NvidiaMetricsUnavailable
+        expr: nvidia_gpu_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NVIDIA telemetry is unavailable"
+          description: "nvidia-smi is failing inside the exporter container."
