@@ -2,7 +2,7 @@
 
 This change set contains exactly 25 scoped improvements. It is designed for the existing 16 GB GPU laptop host and does not add another always-running application or expose another port.
 
-1. Enable a tiny init process in every long-running Compose service so orphaned child processes are reaped.
+1. Enable a tiny init process in compatible long-running Compose services so orphaned child processes are reaped; retain PID 1 for LinuxServer's s6-overlay.
 2. Cap each long-running service at 1,024 processes to limit fork bombs and runaway workers.
 3. Give services and the systemd stop path a 45-second graceful shutdown window for safer database and application stops.
 4. Sandbox the agent gateway with a read-only root filesystem, no Linux capabilities, a constrained temporary filesystem, a two-CPU ceiling, and explicit readable application-file modes for unprivileged custom images.
