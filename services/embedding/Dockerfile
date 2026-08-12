@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 
 WORKDIR /app
 COPY --chmod=0644 app.py /app/app.py
+COPY --chmod=0644 test_app.py /app/test_app.py
 USER 1000:1000
 EXPOSE 8080
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

@@ -2,7 +2,9 @@
 set -euo pipefail
 base="${AGENT_GATEWAY_URL:-http://192.168.1.68:8090}"
 key_file="${AGENT_KEY_FILE:-/srv/ai-node/secrets/agent-gateway.env}"
-key="$(sed -n 's/^AGENT_GATEWAY_KEY=//p' "$key_file")"
+[[ -r $key_file ]] || { echo "Cannot read gateway key file: $key_file" >&2; exit 1; }
+key="$(sed -n 's/^AGENT_GATEWAY_KEY=//p' "$key_file" | tail -n1)"
+[[ ${#key} -ge 32 ]] || { echo "Gateway key is missing or shorter than 32 characters" >&2; exit 1; }
 case "${1:-status}" in
   status|doctor) curl -fsS -H "Authorization: Bearer $key" "$base/health"; echo; curl -fsS -H "Authorization: Bearer $key" "$base/tools"; echo ;;
   tools) curl -fsS -H "Authorization: Bearer $key" "$base/openapi.json" ;;

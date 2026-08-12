@@ -91,13 +91,13 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 ## Monitoring
 
-Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, and failed GPU telemetry; inspect them at `http://192.168.1.68:9091/alerts`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
+Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
 
 Generated Grafana, Speedtest Tracker, and Uptime Kuma credentials are stored only in `/srv/ai-node/secrets/*.env` and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 
 ## Backup and restore
 
-Run `sudo /srv/ai-node/scripts/backup.sh`. It briefly pauses stateful web containers, archives configuration, secrets, databases, workflows, and `/srv/repos`, excludes Prometheus history and downloadable caches/models, read-tests the archive, verifies a SHA-256 sidecar, and keeps 14 days of local archives. After installing and enabling `ai-node-backup.timer`, the same verified backup runs nightly around 03:30 with a randomized delay.
+Run `sudo /srv/ai-node/scripts/backup.sh`. It briefly pauses stateful web containers, archives configuration, secrets, databases, workflows, and `/srv/repos`, excludes Prometheus history and downloadable caches/models, read-tests the archive, verifies a SHA-256 sidecar, publishes status and Prometheus freshness records, and keeps 14 days of local archives. After installing and enabling `ai-node-backup.timer`, the same verified backup runs nightly around 03:30 America/New_York with a randomized delay.
 
 For real disaster recovery, attach and mount an external disk or NAS, then run:
 

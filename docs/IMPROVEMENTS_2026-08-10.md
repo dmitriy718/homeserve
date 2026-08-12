@@ -15,7 +15,7 @@ This change set contains exactly 25 scoped improvements. It is designed for the 
 11. Add a native Docker health check for Grafana.
 12. Add a native Docker health check and container hardening for the NVIDIA exporter.
 13. Add the agent gateway to Prometheus blackbox HTTP monitoring.
-14. Add Prometheus alerts for scrape/probe failures, root-disk pressure, memory pressure, GPU heat, and missing GPU telemetry.
+14. Add Prometheus alerts for scrape/probe failures, root-disk pressure, memory pressure, GPU heat, missing GPU telemetry, and stale or missing verified backups.
 15. Refuse an external-backup path under `/mnt` or `/media` when it is still on the root filesystem.
 16. Write backups to a partial name, read-test the archive, and verify its SHA-256 sidecar before declaring success.
 17. Expire old backup archives, checksum sidecars, and abandoned partial archives together.

@@ -11,4 +11,6 @@ The read-only transparency dashboard is available at `http://192.168.1.68:8090/t
 
 Calls are written to `agent-audit.jsonl` without request bodies or credentials. These tools inspect services; they do not scan arbitrary networks, change UFW, change SSH, alter Docker, or execute host-root remediation. The gateway is containerized as UID 1000 without the host Docker socket and with workspace-only filesystem mounts. Host firewall changes remain an administrator action.
 
+URLs containing embedded credentials or fragments are rejected so secrets cannot be copied into the audit log. Hostnames and URL sizes are bounded. The OpenAPI schema requires the same gateway key as tool calls.
+
 For an incident, the agent should first collect evidence with these tools, preserve the result in the artifact directory, and recommend or request the smallest corrective action.
