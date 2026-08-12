@@ -1,5 +1,5 @@
 """Small, model-independent OpenAPI tool gateway for scoped agent workspaces."""
-import hashlib, hmac, os, subprocess, time, json, socket, ssl
+import hashlib, hmac, os, signal, stat, subprocess, tempfile, threading, time, json, socket, ssl
 import asyncio
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -15,21 +15,30 @@ API_KEY = os.getenv("AGENT_GATEWAY_KEY", "")
 if len(API_KEY) < 32:
     raise RuntimeError("AGENT_GATEWAY_KEY must be set to at least 32 characters")
 ROOT.mkdir(parents=True, exist_ok=True); ARTIFACTS.mkdir(parents=True, exist_ok=True)
-app = FastAPI(title="AI Node Agent Gateway", version="1.0.0", description="Scoped filesystem and shell tools for agent projects.")
+app = FastAPI(
+    title="AI Node Agent Gateway",
+    version="1.1.0",
+    description="Scoped filesystem and shell tools for agent projects.",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 MAX_COMMAND_CHARS = 20_000
 MAX_WRITE_CHARS = 5_000_000
 MAX_AUDIT_BYTES = 10 * 1024 * 1024
+AUDIT_LOCK = threading.Lock()
 
 def audit(action: str, detail: dict | None = None):
     record = {"ts": time.time(), "action": action, "detail": detail or {}}
     try:
-        path = ARTIFACTS / "agent-audit.jsonl"
-        if path.exists() and path.stat().st_size >= MAX_AUDIT_BYTES:
-            rotated = ARTIFACTS / "agent-audit.jsonl.1"
-            rotated.unlink(missing_ok=True)
-            path.replace(rotated)
-        with path.open("a") as f: f.write(json.dumps(record, separators=(",", ":")) + "\n")
+        with AUDIT_LOCK:
+            path = ARTIFACTS / "agent-audit.jsonl"
+            if path.exists() and path.stat().st_size >= MAX_AUDIT_BYTES:
+                rotated = ARTIFACTS / "agent-audit.jsonl.1"
+                rotated.unlink(missing_ok=True)
+                path.replace(rotated)
+            with path.open("a") as f: f.write(json.dumps(record, separators=(",", ":")) + "\n")
     except OSError: pass
 
 def auth(x_agent_key: Optional[str], authorization: Optional[str]):
@@ -54,8 +63,13 @@ class ShellReq(BaseModel):
 @app.get("/health", operation_id="agent_health")
 def health(): return {"status":"ok", "workspace_root":str(ROOT), "artifact_root":str(ARTIFACTS)}
 
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_schema(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization); return app.openapi()
+
 @app.get("/tools", operation_id="list_agent_tools")
-def tools(): return {"tools":["fs_list","fs_read","fs_write","fs_mkdir","fs_delete","fs_hash","shell_exec","http_security_check","tcp_probe","dns_lookup","tls_certificate"]}
+def tools(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization); return {"tools":["fs_list","fs_read","fs_write","fs_mkdir","fs_delete","fs_hash","shell_exec","http_security_check","tcp_probe","dns_lookup","tls_certificate"]}
 
 SERVICE_CHECKS = {
     "ollama": "http://ollama:11434/api/tags",
@@ -73,8 +87,8 @@ def service_snapshot():
     for name,url in SERVICE_CHECKS.items():
         started=time.time()
         try:
-            r=urlopen(Request(url,headers={"User-Agent":"ai-node-transparency/1.0"}),timeout=3)
-            out.append({"service":name,"url":url,"status":"up","http_status":r.status,"latency_ms":round((time.time()-started)*1000,2)})
+            with urlopen(Request(url,headers={"User-Agent":"ai-node-transparency/1.0"}),timeout=3) as response:
+                out.append({"service":name,"url":url,"status":"up","http_status":response.status,"latency_ms":round((time.time()-started)*1000,2)})
         except Exception as e:
             out.append({"service":name,"url":url,"status":"down","error":f"{type(e).__name__}: {e}","latency_ms":round((time.time()-started)*1000,2)})
     return {"timestamp":time.time(),"services":out}
@@ -88,7 +102,13 @@ def transparency_audit(limit: int = Query(100, ge=1, le=1000), x_agent_key: Opti
     auth(x_agent_key, authorization); p=ARTIFACTS/"agent-audit.jsonl"
     if not p.exists(): return {"events":[]}
     lines=p.read_text(errors="replace").splitlines()[-limit:]
-    return {"events":[json.loads(x) for x in lines if x.strip()]}
+    events=[]
+    for line in lines:
+        try:
+            if line.strip(): events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"events":events}
 
 @app.get("/transparency/events", operation_id="transparency_events")
 async def transparency_events(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
@@ -110,7 +130,12 @@ def fs_list(path: str = "", x_agent_key: Optional[str] = Header(None), authoriza
     auth(x_agent_key, authorization); p=safe(path)
     if not p.exists(): raise HTTPException(404,"path not found")
     if not p.is_dir(): raise HTTPException(400,"not a directory")
-    return {"path":path,"entries":[{"name":x.name,"type":"dir" if x.is_dir() else "file","size":x.stat().st_size if x.is_file() else None} for x in sorted(p.iterdir())]}
+    entries=[]
+    for x in sorted(p.iterdir()):
+        info=x.lstat()
+        kind="symlink" if stat.S_ISLNK(info.st_mode) else "dir" if stat.S_ISDIR(info.st_mode) else "file"
+        entries.append({"name":x.name,"type":kind,"size":info.st_size if kind == "file" else None})
+    return {"path":path,"entries":entries}
 
 @app.get("/fs/read", operation_id="fs_read")
 def fs_read(path: str, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
@@ -125,28 +150,51 @@ def fs_read(path: str, x_agent_key: Optional[str] = Header(None), authorization:
 def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization)
     p=safe(req.path)
-    existing_size = p.stat().st_size if req.append and p.exists() else 0
-    if len(req.content) > MAX_WRITE_CHARS or existing_size + len(req.content.encode()) > MAX_WRITE_CHARS:
+    if p.exists() and not p.is_file(): raise HTTPException(400, "path is not a regular file")
+    try: existing = p.read_text() if req.append and p.exists() else ""
+    except UnicodeDecodeError: raise HTTPException(415, "cannot append text to a binary file")
+    content = existing + req.content
+    encoded = content.encode()
+    if len(req.content) > MAX_WRITE_CHARS or len(encoded) > MAX_WRITE_CHARS:
         raise HTTPException(413, "resulting file exceeds the 5,000,000-byte limit")
-    audit("fs_write", {"path": req.path, "append": req.append}); p.parent.mkdir(parents=True,exist_ok=True)
-    mode="a" if req.append else "w"; p.open(mode).write(req.content)
+    p.parent.mkdir(parents=True,exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{p.name}.", dir=p.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(encoded)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, p)
+        directory_descriptor=os.open(p.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(directory_descriptor)
+        finally: os.close(directory_descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+    audit("fs_write", {"path": req.path, "append": req.append})
     return {"path":req.path,"bytes":p.stat().st_size,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
 
 @app.post("/fs/mkdir", operation_id="fs_mkdir")
 def fs_mkdir(req: PathReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    auth(x_agent_key, authorization); p=safe(req.path); p.mkdir(parents=True,exist_ok=True); return {"path":req.path,"created":True}
+    auth(x_agent_key, authorization); audit("fs_mkdir", {"path":req.path}); p=safe(req.path); p.mkdir(parents=True,exist_ok=True); return {"path":req.path,"created":True}
 
 @app.delete("/fs/delete", operation_id="fs_delete")
 def fs_delete(path: str, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); p=safe(path)
     if not p.exists(): raise HTTPException(404,"path not found")
     if p.is_dir(): raise HTTPException(400,"directory deletion requires explicit project cleanup")
+    audit("fs_delete", {"path":path})
     p.unlink(); return {"path":path,"deleted":True}
 
 @app.get("/fs/hash", operation_id="fs_hash")
 def fs_hash(path: str, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); p=safe(path)
-    return {"path":path,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
+    if not p.is_file(): raise HTTPException(404,"file not found")
+    if p.stat().st_size > 100_000_000: raise HTTPException(413,"file exceeds the 100,000,000-byte hash limit")
+    digest=hashlib.sha256()
+    with p.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""): digest.update(chunk)
+    return {"path":path,"sha256":digest.hexdigest()}
 
 @app.post("/shell/exec", operation_id="shell_exec")
 def shell_exec(req: ShellReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
@@ -154,32 +202,50 @@ def shell_exec(req: ShellReq, x_agent_key: Optional[str] = Header(None), authori
     if len(req.command) > MAX_COMMAND_CHARS: raise HTTPException(413, "command exceeds 20,000 characters")
     audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
     started=time.time()
+    shell_env = {
+        "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "HOME": "/srv/agent-cache",
+        "TMPDIR": "/tmp",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "AGENT_PROJECT": req.project,
+    }
+    process=subprocess.Popen(["bash","-lc",req.command],cwd=wd,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=shell_env,start_new_session=True)
     try:
-        r=subprocess.run(["bash","-lc",req.command],cwd=wd,text=True,capture_output=True,timeout=req.timeout_seconds,env={**os.environ,"AGENT_PROJECT":req.project})
-        return {"project":req.project,"command":req.command,"exit_code":r.returncode,"stdout":r.stdout[-20000:],"stderr":r.stderr[-20000:],"duration_seconds":round(time.time()-started,3)}
-    except subprocess.TimeoutExpired as e:
-        return {"project":req.project,"command":req.command,"exit_code":124,"stdout":(e.stdout or "")[-20000:],"stderr":(e.stderr or "")[-20000:],"timed_out":True,"duration_seconds":round(time.time()-started,3)}
+        stdout,stderr=process.communicate(timeout=req.timeout_seconds)
+        return {"project":req.project,"command":req.command,"exit_code":process.returncode,"stdout":stdout[-20000:],"stderr":stderr[-20000:],"duration_seconds":round(time.time()-started,3)}
+    except subprocess.TimeoutExpired:
+        try: os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError: pass
+        try: stdout,stderr=process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try: os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            stdout,stderr=process.communicate()
+        return {"project":req.project,"command":req.command,"exit_code":124,"stdout":stdout[-20000:],"stderr":stderr[-20000:],"timed_out":True,"duration_seconds":round(time.time()-started,3)}
 
 class URLReq(BaseModel):
-    url: str
+    url: str = Field(..., min_length=1, max_length=2048)
     timeout_seconds: int = Field(10, ge=1, le=30)
 
 def checked_url(url: str):
     u=urlparse(url)
     if u.scheme not in ("http", "https") or not u.netloc: raise HTTPException(400, "only http and https URLs are allowed")
+    if u.username is not None or u.password is not None: raise HTTPException(400, "URL credentials are not allowed")
+    if u.fragment: raise HTTPException(400, "URL fragments are not allowed")
     return u
 
 @app.post("/security/http", operation_id="http_security_check")
 def http_security_check(req: URLReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); u=checked_url(req.url); audit("http_security_check", {"url": req.url})
     try:
-        r=urlopen(Request(req.url, method="GET", headers={"User-Agent":"ai-node-security-check/1.0"}), timeout=req.timeout_seconds)
-        headers={k.lower():v for k,v in r.headers.items()}; wanted=["strict-transport-security","content-security-policy","x-content-type-options","x-frame-options","referrer-policy","permissions-policy"]
-        return {"url":req.url,"status":r.status,"final_url":r.geturl(),"security_headers":{k:headers.get(k) for k in wanted},"missing_headers":[k for k in wanted if k not in headers],"server":headers.get("server"),"content_type":headers.get("content-type")}
+        with urlopen(Request(req.url, method="GET", headers={"User-Agent":"ai-node-security-check/1.0"}), timeout=req.timeout_seconds) as response:
+            headers={k.lower():v for k,v in response.headers.items()}; wanted=["strict-transport-security","content-security-policy","x-content-type-options","x-frame-options","referrer-policy","permissions-policy"]
+            return {"url":req.url,"status":response.status,"final_url":response.geturl(),"security_headers":{k:headers.get(k) for k in wanted},"missing_headers":[k for k in wanted if k not in headers],"server":headers.get("server"),"content_type":headers.get("content-type")}
     except Exception as e: raise HTTPException(502, f"request failed: {type(e).__name__}: {e}")
 
 class TCPReq(BaseModel):
-    host: str
+    host: str = Field(..., min_length=1, max_length=253)
     port: int = Field(..., ge=1, le=65535)
     timeout_seconds: int = Field(3, ge=1, le=10)
 
@@ -187,17 +253,19 @@ class TCPReq(BaseModel):
 def tcp_probe(req: TCPReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); audit("tcp_probe", {"host": req.host, "port": req.port})
     try:
-        started=time.time(); s=socket.create_connection((req.host,req.port),timeout=req.timeout_seconds); s.close(); return {"host":req.host,"port":req.port,"reachable":True,"latency_ms":round((time.time()-started)*1000,2)}
+        started=time.time()
+        with socket.create_connection((req.host,req.port),timeout=req.timeout_seconds): pass
+        return {"host":req.host,"port":req.port,"reachable":True,"latency_ms":round((time.time()-started)*1000,2)}
     except OSError as e: return {"host":req.host,"port":req.port,"reachable":False,"error":str(e)}
 
 @app.get("/security/dns", operation_id="dns_lookup")
-def dns_lookup(host: str, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+def dns_lookup(host: str = Query(..., min_length=1, max_length=253), x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); audit("dns_lookup", {"host":host})
     try: return {"host":host,"addresses":sorted({x[4][0] for x in socket.getaddrinfo(host,None)})}
     except OSError as e: raise HTTPException(502, str(e))
 
 @app.get("/security/tls", operation_id="tls_certificate")
-def tls_certificate(host: str, port: int = 443, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+def tls_certificate(host: str = Query(..., min_length=1, max_length=253), port: int = Query(443, ge=1, le=65535), x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization); audit("tls_certificate", {"host":host,"port":port})
     try:
         ctx=ssl.create_default_context(); started=time.time()

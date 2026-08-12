@@ -6,3 +6,4 @@ Registration is intentionally not performed. It requires the repository or organ
 
 Giving a runner Docker access is equivalent to giving every accepted workflow root access to this server. Keep this runner out of the Docker group; route container builds through a separately reviewed isolated worker or a remote builder. Never attach it to public-fork pull-request workflows with secrets.
 
+The example unit also isolates devices and temporary files, protects kernel/control-group state and logs, blocks setuid/setgid creation, locks the process personality, restricts syscall architectures to the host architecture, and applies a restrictive umask. Re-run `systemd-analyze security` after installing or changing the runner because workflow tool requirements may constrain further sandboxing.

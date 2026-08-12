@@ -54,3 +54,21 @@ groups:
         annotations:
           summary: "NVIDIA telemetry is unavailable"
           description: "nvidia-smi is failing inside the exporter container."
+
+      - alert: BackupStale
+        expr: time() - ai_node_backup_last_success_unixtime_seconds > 129600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No verified backup in 36 hours"
+          description: "The scheduled backup is stale; inspect ai-node-backup.service and available storage."
+
+      - alert: BackupMetricMissing
+        expr: absent(ai_node_backup_last_success_unixtime_seconds)
+        for: 26h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup success metric is missing"
+          description: "No backup success metric has been published for more than 26 hours."

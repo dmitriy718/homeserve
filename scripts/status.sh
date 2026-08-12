@@ -25,12 +25,18 @@ if [[ -n $unhealthy ]]; then
 fi
 echo
 echo "Backup:"
-latest_backup=$(find /srv/backups/local -maxdepth 1 -type f -name 'ai-node-*.tar.zst' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2-)
-if [[ -n $latest_backup ]]; then
-  backup_age=$(( ($(date +%s) - $(stat -c %Y "$latest_backup")) / 3600 ))
-  echo "Latest local backup: $latest_backup (${backup_age}h old)"
+backup_status=/srv/ai-node/data/backup-status/last-success
+if [[ -r $backup_status ]]; then
+  backup_timestamp=$(sed -n 's/^timestamp=//p' "$backup_status" | tail -n1)
+  latest_backup=$(sed -n 's/^archive=//p' "$backup_status" | tail -n1)
+  if [[ $backup_timestamp =~ ^[0-9]+$ && -n $latest_backup ]]; then
+    backup_age=$(( ($(date +%s) - backup_timestamp) / 3600 ))
+    echo "Latest verified backup: $latest_backup (${backup_age}h old)"
+  else
+    echo "Latest verified backup: invalid status record"
+  fi
 else
-  echo "Latest local backup: none"
+  echo "Latest verified backup: no status record (run backup.sh once after this update)"
 fi
 if [[ -e /var/run/reboot-required ]]; then
   echo "Reboot required: yes"

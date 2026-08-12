@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from typing import List, Union
 
 from fastapi import FastAPI, HTTPException
@@ -9,9 +10,23 @@ MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v
 MODEL_CACHE = os.getenv("MODEL_CACHE", "/models")
 MAX_INPUTS = int(os.getenv("MAX_EMBEDDING_INPUTS", "64"))
 MAX_CHARS = int(os.getenv("MAX_EMBEDDING_CHARS", "50000"))
-model = SentenceTransformer(MODEL_NAME, device="cpu", cache_folder=MODEL_CACHE)
+model = None
 
-app = FastAPI(title="AI Node Embeddings", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global model
+    model = SentenceTransformer(MODEL_NAME, device="cpu", cache_folder=MODEL_CACHE)
+    yield
+
+
+app = FastAPI(title="AI Node Embeddings", version="1.1.0", lifespan=lifespan)
+
+
+def loaded_model():
+    if model is None:
+        raise HTTPException(status_code=503, detail="embedding model is not loaded")
+    return model
 
 
 class EmbeddingRequest(BaseModel):
@@ -21,7 +36,8 @@ class EmbeddingRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": MODEL_NAME, "dimensions": model.get_sentence_embedding_dimension()}
+    active_model = loaded_model()
+    return {"status": "ok", "model": MODEL_NAME, "dimensions": active_model.get_sentence_embedding_dimension()}
 
 
 @app.get("/v1/models")
@@ -40,7 +56,7 @@ def embeddings(request: EmbeddingRequest):
         raise HTTPException(status_code=413, detail=f"at most {MAX_INPUTS} inputs are allowed")
     if sum(len(text) for text in texts) > MAX_CHARS:
         raise HTTPException(status_code=413, detail=f"input exceeds {MAX_CHARS} total characters")
-    vectors = model.encode(texts, normalize_embeddings=True).tolist()
+    vectors = loaded_model().encode(texts, normalize_embeddings=True).tolist()
     data = [{"object": "embedding", "index": i, "embedding": vector} for i, vector in enumerate(vectors)]
     token_estimate = sum(max(1, len(text.split())) for text in texts)
     return {

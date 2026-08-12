@@ -29,18 +29,33 @@ flock -n 9 || { echo "Another backup is running" >&2; exit 1; }
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 archive="$backup_dest/ai-node-$stamp.tar.zst"
 partial="$archive.partial"
+checksum="$archive.sha256"
+checksum_partial="$checksum.partial"
+status_tmp=""
+finalized=false
 compose=(docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml)
 paused=()
 
-cleanup() {
+unpause_services() {
   if ((${#paused[@]})); then
     "${compose[@]}" unpause "${paused[@]}" >/dev/null 2>&1 || true
+    paused=()
   fi
-  rm -f -- "$partial"
 }
-trap cleanup EXIT INT TERM
 
-for service in open-webui grafana uptime-kuma speedtest-tracker; do
+cleanup() {
+  unpause_services
+  rm -f -- "$partial" "$checksum_partial"
+  [[ -z $status_tmp ]] || rm -f -- "$status_tmp"
+  if ! $finalized; then
+    rm -f -- "$archive" "$checksum"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+for service in agent-gateway open-webui comfyui grafana uptime-kuma speedtest-tracker; do
   container=$("${compose[@]}" ps -q "$service")
   if [[ -n $container ]] && [[ $(docker inspect -f '{{.State.Running}}' "$container") == true ]]; then
     "${compose[@]}" pause "$service" >/dev/null
@@ -52,6 +67,8 @@ if ! tar --zstd --acls --xattrs -cpf "$partial" \
   --exclude='ai-node/data/prometheus' \
   --exclude='ai-node/data/open-webui/cache' \
   --exclude='ai-node/data/grafana/plugins' \
+  --exclude='ai-node/data/backup-status' \
+  --exclude='ai-node/data/node-exporter-textfile' \
   --exclude='ai-node/logs' \
   --exclude='backups' \
   -C /srv ai-node repos; then
@@ -63,18 +80,44 @@ if ! tar --zstd -tf "$partial" >/dev/null; then
   exit 1
 fi
 mv -- "$partial" "$archive"
-cleanup
-paused=()
-trap - EXIT INT TERM
+unpause_services
 
-sha256sum "$archive" > "$archive.sha256"
-chmod 0600 "$archive.sha256"
+sha256sum "$archive" > "$checksum_partial"
+chmod 0600 "$checksum_partial"
+mv -- "$checksum_partial" "$checksum"
 (
   cd "$backup_dest"
-  sha256sum -c "$(basename "$archive.sha256")" >/dev/null
+  sha256sum -c "$(basename "$checksum")" >/dev/null
 )
+
+status_dir=/srv/ai-node/data/backup-status
+install -d -m 0755 "$status_dir"
+status_tmp=$(mktemp "$status_dir/last-success.XXXXXX")
+printf 'timestamp=%s\narchive=%s\nchecksum=%s\n' \
+  "$(date +%s)" "$archive" "$checksum" >"$status_tmp"
+chmod 0644 "$status_tmp"
+mv -- "$status_tmp" "$status_dir/last-success"
+status_tmp=""
+finalized=true
+trap - EXIT INT TERM
+
+metrics_dir=/srv/ai-node/data/node-exporter-textfile
+if install -d -m 0755 "$metrics_dir" && metrics_tmp=$(mktemp "$metrics_dir/backup.XXXXXX"); then
+  if printf '# HELP ai_node_backup_last_success_unixtime_seconds Unix time of the last verified backup.\n# TYPE ai_node_backup_last_success_unixtime_seconds gauge\nai_node_backup_last_success_unixtime_seconds %s\n' \
+      "$(date +%s)" >"$metrics_tmp" \
+      && chmod 0644 "$metrics_tmp" \
+      && mv -- "$metrics_tmp" "$metrics_dir/backup.prom"; then
+    :
+  else
+    rm -f -- "$metrics_tmp"
+    echo "WARNING: backup succeeded but publishing its Prometheus metric failed" >&2
+  fi
+else
+  echo "WARNING: backup succeeded but creating its Prometheus metric failed" >&2
+fi
+
 find "$backup_dest" -maxdepth 1 -type f \
-  \( -name 'ai-node-*.tar.zst' -o -name 'ai-node-*.tar.zst.sha256' -o -name 'ai-node-*.tar.zst.partial' \) \
+  \( -name 'ai-node-*.tar.zst' -o -name 'ai-node-*.tar.zst.sha256' -o -name 'ai-node-*.partial' \) \
   -mtime +14 -delete
 echo "Created $archive"
 if [[ $backup_dest == /srv/backups/* ]]; then

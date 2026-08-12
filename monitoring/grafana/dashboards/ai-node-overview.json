@@ -76,6 +76,26 @@
       "targets": [{"expr": "probe_success", "legendFormat": "{{job}} {{instance}}", "refId": "A"}],
       "title": "Network and Service Probes",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "h", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 24}, {"color": "red", "value": 36}]}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 14},
+      "id": 8,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "clamp_min((time() - ai_node_backup_last_success_unixtime_seconds) / 3600, 0)", "refId": "A"}],
+      "title": "Verified Backup Age",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 14},
+      "id": 9,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)", "refId": "A"}],
+      "title": "Firing Alerts",
+      "type": "stat"
     }
   ],
   "refresh": "30s",
@@ -87,7 +107,6 @@
   "timezone": "browser",
   "title": "AI Node Overview",
   "uid": "ai-node-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
-
