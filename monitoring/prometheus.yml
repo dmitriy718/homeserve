@@ -62,6 +62,26 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
+  # Label-discovered HTTP probes (docs/APP_MANIFEST.md): targets.d/probes.json
+  # is regenerated from homeserv.probe.url container labels by
+  # scripts/discover-services.sh (bind-mounted from monitoring/targets.d).
+  # The static blackbox_http job above stays as fallback for when discovery
+  # has not run yet.
+  - job_name: blackbox_http_file_sd
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets.d/*.json
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   - job_name: blackbox_dns
     metrics_path: /probe
     params:

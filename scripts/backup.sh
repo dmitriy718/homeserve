@@ -80,7 +80,22 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-for service in agent-gateway open-webui comfyui grafana uptime-kuma speedtest-tracker; do
+# Services to pause during the archive: derived from the
+# homeserv.backup.pause=true container label (docs/APP_MANIFEST.md), with a
+# static fallback when Docker or the labels are unavailable.
+pause_services=()
+if docker info >/dev/null 2>&1; then
+  while IFS= read -r svc; do
+    [[ -n $svc ]] && pause_services+=("$svc")
+  done < <(docker ps --filter label=com.docker.compose.project=ai-node \
+      --filter label=homeserv.backup.pause=true \
+      --format '{{index .Labels "com.docker.compose.service"}}' | sort -u)
+fi
+if ((${#pause_services[@]} == 0)); then
+  pause_services=(agent-gateway open-webui comfyui grafana uptime-kuma speedtest-tracker)
+fi
+
+for service in "${pause_services[@]}"; do
   container=$("${compose[@]}" ps -q "$service")
   if [[ -n $container ]] && [[ $(docker inspect -f '{{.State.Running}}' "$container") == true ]]; then
     "${compose[@]}" pause "$service" >/dev/null

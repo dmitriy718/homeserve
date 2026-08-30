@@ -130,42 +130,80 @@ const SERVICES = [
 
 const grid = document.getElementById("grid");
 
-for (const svc of SERVICES) {
-  const tile = document.createElement("div");
-  tile.className = "tile";
+function renderServices(services, baseDomain) {
+  for (const svc of services) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
 
-  const proxyUrl = svc.sub ? `https://${svc.sub}.${BASE_DOMAIN}` : null;
-  const legacyUrl = svc.port ? `http://${LEGACY_HOST}:${svc.port}` : null;
+    const proxyUrl = svc.sub ? `https://${svc.sub}.${baseDomain}` : null;
+    const legacyUrl = svc.port ? `http://${LEGACY_HOST}:${svc.port}` : null;
 
-  const links = proxyUrl && legacyUrl
-    ? `<a href="${proxyUrl}">${svc.sub}.${BASE_DOMAIN}</a><a class="legacy" href="${legacyUrl}">:${svc.port}</a>`
-    : proxyUrl
-      ? `<a href="${proxyUrl}">${svc.sub}.${BASE_DOMAIN}</a>`
-      : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
+    const links = proxyUrl && legacyUrl
+      ? `<a href="${proxyUrl}">${svc.sub}.${baseDomain}</a><a class="legacy" href="${legacyUrl}">:${svc.port}</a>`
+      : proxyUrl
+        ? `<a href="${proxyUrl}">${svc.sub}.${baseDomain}</a>`
+        : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
 
-  tile.innerHTML =
-    `<h2><span class="dot" title="status unknown"></span>${svc.name}</h2>` +
-    `<p class="purpose">${svc.purpose}</p>` +
-    `<div class="links">${links}</div>`;
-  grid.appendChild(tile);
+    // Name/purpose may come from container labels, so they go in as text.
+    const heading = document.createElement("h2");
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.title = "status unknown";
+    heading.appendChild(dot);
+    heading.appendChild(document.createTextNode(svc.name));
+    const purpose = document.createElement("p");
+    purpose.className = "purpose";
+    purpose.textContent = svc.purpose;
+    const linkBar = document.createElement("div");
+    linkBar.className = "links";
+    linkBar.innerHTML = links;
+    tile.appendChild(heading);
+    tile.appendChild(purpose);
+    tile.appendChild(linkBar);
+    grid.appendChild(tile);
 
-  // No legacy port for this service (SSO portal): nothing to probe.
-  if (!svc.probe) {
-    tile.querySelector(".dot").style.display = "none";
-    continue;
+    // No legacy port for this service (SSO portal): nothing to probe.
+    if (!svc.probe) {
+      dot.style.display = "none";
+      continue;
+    }
+    // Rough liveness probe against the legacy HTTP port. no-cors means we only
+    // learn "something answered", not the status code — good enough for a dot.
+    // From an HTTPS page the browser blocks these probes as mixed content; the
+    // dot then stays gray, which is intentional.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    fetch(`${legacyUrl}${svc.probe}`, { mode: "no-cors", signal: controller.signal, cache: "no-store" })
+      .then(() => { dot.classList.add("up"); dot.title = "reachable"; })
+      .catch(() => { dot.title = "unknown (blocked or down)"; })
+      .finally(() => clearTimeout(timer));
   }
-  // Rough liveness probe against the legacy HTTP port. no-cors means we only
-  // learn "something answered", not the status code — good enough for a dot.
-  // From an HTTPS page the browser blocks these probes as mixed content; the
-  // dot then stays gray, which is intentional.
-  const dot = tile.querySelector(".dot");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
-  fetch(`${legacyUrl}${svc.probe}`, { mode: "no-cors", signal: controller.signal, cache: "no-store" })
-    .then(() => { dot.classList.add("up"); dot.title = "reachable"; })
-    .catch(() => { dot.title = "unknown (blocked or down)"; })
-    .finally(() => clearTimeout(timer));
 }
+
+// Prefer the label-derived service list written by discover-services.sh
+// (docs/APP_MANIFEST.md), served alongside this page by Caddy. Fall back to
+// the static array above when the file is missing/empty or the page was
+// opened from a plain IP or localhost (no base domain to build links with).
+fetch("services.json", { cache: "no-store" })
+  .then((res) => {
+    if (!res.ok) throw new Error(`services.json: HTTP ${res.status}`);
+    return res.json();
+  })
+  .then((list) => {
+    if (!Array.isArray(list) || list.length === 0) throw new Error("services.json empty");
+    const parts = window.location.hostname.split(".");
+    if (parts.length < 2 || /^\d+$/.test(parts[parts.length - 1])) throw new Error("no base domain");
+    const baseDomain = parts.slice(-2).join(".");
+    renderServices(list.map((s) => ({
+      name: String(s.name),
+      purpose: typeof s.purpose === "string" ? s.purpose : "",
+      sub: typeof s.subdomain === "string" && /^[a-z0-9-]+$/.test(s.subdomain) ? s.subdomain : null,
+      port: Number.isInteger(s.legacyPort) ? s.legacyPort : null,
+      // The generated list carries no probe path; these tiles show no dot.
+      probe: null
+    })), baseDomain);
+  })
+  .catch(() => renderServices(SERVICES, BASE_DOMAIN));
 </script>
 </body>
 </html>
