@@ -1,6 +1,8 @@
 .env
 secrets/*
 !secrets/.gitkeep
+!secrets/*.env.example
+!secrets/agent-gateway.key.example
 data/
 logs/
 *.log
@@ -21,3 +23,4 @@ agent-platform/cache/
 agent-platform/logs/
 agent-platform/secrets/
 secrets/agent-gateway.env
+secrets/agent-gateway.key
