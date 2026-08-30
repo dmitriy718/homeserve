@@ -1,4 +1,11 @@
-"""Small, model-independent OpenAPI tool gateway for scoped agent workspaces."""
+"""Small, model-independent OpenAPI tool gateway for scoped agent workspaces.
+
+API key handling: prefer AGENT_GATEWAY_KEY_FILE (Docker secrets convention) so the
+key never sits in the container environment, where any same-UID process could read
+it via /proc/<pid>/environ. AGENT_GATEWAY_KEY is only a fallback for development.
+Either way the key is held in a module-level variable and scrubbed from os.environ
+below, so children that ever inherit this process environment cannot see it.
+"""
 import hashlib, hmac, os, signal, stat, subprocess, tempfile, threading, time, json, socket, ssl
 import asyncio
 from urllib.parse import urlparse
@@ -11,9 +18,18 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(os.getenv("WORKSPACE_ROOT", "/srv/agent-workspaces")).resolve()
 ARTIFACTS = Path(os.getenv("ARTIFACT_ROOT", "/srv/agent-artifacts")).resolve()
-API_KEY = os.getenv("AGENT_GATEWAY_KEY", "")
+def _load_api_key() -> str:
+    key_file = os.getenv("AGENT_GATEWAY_KEY_FILE")
+    if key_file:
+        try: return Path(key_file).read_text().strip()
+        except OSError as e: raise RuntimeError(f"AGENT_GATEWAY_KEY_FILE is not readable: {e}") from None
+    return os.getenv("AGENT_GATEWAY_KEY", "")
+
+API_KEY = _load_api_key()
+# Scrub the key from the environment so it is not inherited by children of this process.
+os.environ.pop("AGENT_GATEWAY_KEY", None)
 if len(API_KEY) < 32:
-    raise RuntimeError("AGENT_GATEWAY_KEY must be set to at least 32 characters")
+    raise RuntimeError("AGENT_GATEWAY_KEY (or AGENT_GATEWAY_KEY_FILE) must be set to at least 32 characters")
 ROOT.mkdir(parents=True, exist_ok=True); ARTIFACTS.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="AI Node Agent Gateway",
@@ -49,6 +65,14 @@ def safe(rel: str) -> Path:
     p = (ROOT / rel).resolve()
     if p != ROOT and ROOT not in p.parents: raise HTTPException(400, "path outside workspace root")
     return p
+
+def open_nofollow(p: Path, flags: int):
+    # Open an already-resolved path without following a swapped-in final symlink
+    # (O_NOFOLLOW), closing the check-to-use race on the last component after safe().
+    # Residual risk: a same-UID process could still swap an intermediate directory
+    # between resolve and open; closing that fully needs dirfd-relative opens along
+    # the whole path, which is out of scope for this gateway's threat model.
+    return os.open(p, flags | os.O_NOFOLLOW | os.O_CLOEXEC)
 
 class PathReq(BaseModel):
     path: str = Field(..., description="Path relative to the agent workspace root")
@@ -117,7 +141,7 @@ async def transparency_events(x_agent_key: Optional[str] = Header(None), authori
         last=""
         for _ in range(120):
             snap=json.dumps(service_snapshot(),separators=(",",":"))
-            if snap != last: yield f"event: services\\ndata: {snap}\\n\\n"; last=snap
+            if snap != last: yield f"event: services\ndata: {snap}\n\n"; last=snap
             await asyncio.sleep(2)
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
@@ -142,8 +166,10 @@ def fs_read(path: str, x_agent_key: Optional[str] = Header(None), authorization:
     auth(x_agent_key, authorization); p=safe(path)
     if not p.is_file(): raise HTTPException(404,"file not found")
     if p.stat().st_size > 5_000_000: raise HTTPException(413,"file too large")
-    try: content=p.read_text()
+    try:
+        with os.fdopen(open_nofollow(p, os.O_RDONLY), "r") as source: content = source.read()
     except UnicodeDecodeError: raise HTTPException(415,"binary file; use artifact handling")
+    except OSError: raise HTTPException(404,"file not found")
     return {"path":path,"content":content,"size":p.stat().st_size}
 
 @app.post("/fs/write", operation_id="fs_write")
@@ -151,8 +177,12 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
     auth(x_agent_key, authorization)
     p=safe(req.path)
     if p.exists() and not p.is_file(): raise HTTPException(400, "path is not a regular file")
-    try: existing = p.read_text() if req.append and p.exists() else ""
+    try:
+        existing = ""
+        if req.append and p.exists():
+            with os.fdopen(open_nofollow(p, os.O_RDONLY), "r") as source: existing = source.read()
     except UnicodeDecodeError: raise HTTPException(415, "cannot append text to a binary file")
+    except OSError: raise HTTPException(404, "file not found")
     content = existing + req.content
     encoded = content.encode()
     if len(req.content) > MAX_WRITE_CHARS or len(encoded) > MAX_WRITE_CHARS:
@@ -165,9 +195,16 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
             output.write(encoded)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, p)
-        directory_descriptor=os.open(p.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try: os.fsync(directory_descriptor)
+        # Re-canonicalize the parent right before the rename and pin the rename to
+        # it via dirfd, so a same-UID process swapping a path component between
+        # safe() and here cannot redirect the write (rename replaces a symlinked
+        # destination itself, it never follows it). Residual risk: the parent could
+        # still be swapped after this check; see open_nofollow().
+        if p.parent.resolve() != p.parent: raise HTTPException(400, "path changed during write")
+        directory_descriptor=os.open(p.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.replace(temporary.name, p.name, src_dir_fd=directory_descriptor, dst_dir_fd=directory_descriptor)
+            os.fsync(directory_descriptor)
         finally: os.close(directory_descriptor)
     finally:
         temporary.unlink(missing_ok=True)
@@ -192,7 +229,9 @@ def fs_hash(path: str, x_agent_key: Optional[str] = Header(None), authorization:
     if not p.is_file(): raise HTTPException(404,"file not found")
     if p.stat().st_size > 100_000_000: raise HTTPException(413,"file exceeds the 100,000,000-byte hash limit")
     digest=hashlib.sha256()
-    with p.open("rb") as source:
+    try: source_descriptor = open_nofollow(p, os.O_RDONLY)
+    except OSError: raise HTTPException(404,"file not found")
+    with os.fdopen(source_descriptor, "rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""): digest.update(chunk)
     return {"path":path,"sha256":digest.hexdigest()}
 
