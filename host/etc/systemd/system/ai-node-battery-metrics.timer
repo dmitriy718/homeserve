@@ -1,0 +1,11 @@
+[Unit]
+Description=Frequent battery metrics collection
+
+[Timer]
+OnCalendar=*:0/2
+RandomizedDelaySec=30s
+Persistent=true
+Unit=ai-node-battery-metrics.service
+
+[Install]
+WantedBy=timers.target

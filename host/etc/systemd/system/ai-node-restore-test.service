@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly automated restore verification for AI node backups
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/restore-test.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+TimeoutStartSec=2h

@@ -1,0 +1,9 @@
+[Unit]
+Description=Battery metrics for the node-exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/battery-metrics.sh
+Nice=10
+UMask=0022
+TimeoutStartSec=30

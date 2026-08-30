@@ -1,0 +1,13 @@
+[Unit]
+Description=Encrypted offsite backup of the AI node via restic
+Wants=network-online.target
+After=network-online.target ai-node-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/backup-offsite.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+TimeoutStartSec=4h
