@@ -11,9 +11,9 @@ On a fresh Ubuntu 24.04+ machine, clone this repository and run `sudo scripts/in
 - LAN: `192.168.1.68` on Wi-Fi; SSH with `ssh dima@homeserv` or `ssh dima@192.168.1.68`.
 - Tailscale: `100.65.105.46`; SSH with `ssh dima@100.65.105.46`.
 - Application URLs and ports are listed in [SERVICE_MAP.md](SERVICE_MAP.md).
-- Front door: a Caddy proxy publishes `80`/`443` on both addresses and serves every UI with automatic internal TLS on subdomains of `BASE_DOMAIN` (default `homeserve.lan`): `webui.`, `comfy.`, `grafana.`, `kuma.`, `prom.`, `gateway.`, `ntfy.`, plus a static landing dashboard at the bare domain. DNS and CA-trust setup are documented in [config/caddy/Caddyfile](config/caddy/Caddyfile). The legacy per-service ports remain published for direct access.
+- Front door: a Caddy proxy publishes `80`/`443` on both addresses and serves every UI with automatic internal TLS on subdomains of `BASE_DOMAIN` (default `homeserve.lan`): `auth.`, `lldap.`, `webui.`, `comfy.`, `grafana.`, `kuma.`, `prom.`, `gateway.`, `ntfy.`, plus a static landing dashboard at the bare domain. DNS and CA-trust setup are documented in [config/caddy/Caddyfile](config/caddy/Caddyfile). The legacy per-service ports remain published for direct access.
 - Container ports bind only to the LAN and Tailscale addresses. UFW denies unsolicited inbound traffic by default and permits the application ports only from `192.168.1.0/24` or `tailscale0`.
-- Open WebUI and Grafana require login (Grafana admin credentials are generated on install; Open WebUI's first registered account becomes admin). Do not forward these ports at the router.
+- Single sign-on: an Authelia portal at `https://auth.homeserve.lan` gates the browser-facing UIs (the landing dashboard plus `webui.`, `comfy.`, `grafana.`, `kuma.`, `prom.`, `lldap.`) through Caddy `forward_auth`; one login per session covers them all. Users live in LLDAP, managed at `https://lldap.homeserve.lan` (itself behind SSO): sign in there as `admin` with `LLDAP_LDAP_USER_PASS` from `/srv/ai-node/secrets/lldap.env` (generated on install) and create a non-admin user for daily use. Requiring TOTP is a one-line change (`one_factor` → `two_factor`) in `config/authelia/configuration.yml`. Two routes are deliberately exempt: `gateway.` is a machine-to-machine API with its own bearer key, and `ntfy.` must stay reachable for the ntfy phone app. Open WebUI and Grafana keep their own account layers on top of SSO. Do not forward these ports at the router.
 
 ## Architecture and storage
 
@@ -98,7 +98,7 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Firing alerts go to Alertmanager, which posts them to the self-hosted ntfy service (`http://192.168.1.68:2586` or `https://ntfy.homeserve.lan`): subscribe with the ntfy phone app to topics `homeserve-alerts` and `homeserve-alerts-critical`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts, and requires the generated admin login. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
 
-Generated Grafana, Speedtest Tracker, and Uptime Kuma credentials are stored only in `/srv/ai-node/secrets/*.env` and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
+Generated Grafana, Speedtest Tracker, Uptime Kuma, and LLDAP/Authelia credentials are stored only in `/srv/ai-node/secrets/*.env` (and the Authelia Docker-secret files next to them) and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 
 ## Backup and restore
 
@@ -111,6 +111,10 @@ sudo BACKUP_DEST=/mnt/verified-backup-target /srv/ai-node/scripts/backup.sh
 ```
 
 Verify the target is truly a separate mounted filesystem. To restore, stop the stack, verify the archive with `sha256sum -c ARCHIVE.sha256`, inspect it with `tar --zstd -tf ARCHIVE`, and extract from `/` with `sudo tar --zstd --acls --xattrs -xpf ARCHIVE -C /`. Restore secrets with mode `0600`, confirm service-data ownership, then start the stack and run `health-check.sh`. Model weights must be downloaded again.
+
+Encrypted offsite backups use restic and run nightly about an hour after the local backup via `ai-node-offsite-backup.timer`. They are inactive until configured: install restic (`sudo apt-get install restic`), copy `secrets/restic.env.example` to `/srv/ai-node/secrets/restic.env`, and set `RESTIC_REPOSITORY` (S3, SFTP, or a mounted path). On first run the script generates the encryption password at `/srv/ai-node/secrets/restic-password` and initializes the repository — keep a copy of that password file off the host. Snapshots are pruned to 7 daily, 4 weekly, and 6 monthly, and freshness is published as `ai_node_offsite_backup_last_success_unixtime_seconds` (alerted if older than 48 hours).
+
+Backups are verified automatically once a month: `ai-node-restore-test.timer` runs `scripts/restore-test.sh`, which checksum-verifies, extracts, and spot-checks the newest local archive, and publishes `ai_node_restore_test_success` (a critical alert fires on failure). The laptop battery doubles as a UPS and is monitored every two minutes by `ai-node-battery-metrics.timer`: `ai_node_battery_on_ac` alerts on power loss after five minutes, and `ai_node_battery_capacity_percent` triggers a critical alert below 20% while discharging. A full host-rebuild runbook lives in [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md).
 
 ## Troubleshooting and security
 
