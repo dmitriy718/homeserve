@@ -26,6 +26,22 @@ install -d -m 0755 /run/lock/ai-node
 exec 9>/run/lock/ai-node/backup.lock
 flock -n 9 || { echo "Another backup is running" >&2; exit 1; }
 
+# Pre-flight: refuse to start without room for the archive.
+# Require at least 10 GiB free, or 1.5x the newest previous archive if larger.
+required_free=$((10 * 1024 * 1024 * 1024))
+newest_size=$(find "$backup_dest" -maxdepth 1 -type f -name 'ai-node-*.tar.zst' -printf '%T@ %s\n' \
+  | sort -rn | head -n1 | cut -d' ' -f2)
+if [[ ${newest_size:-} =~ ^[0-9]+$ ]]; then
+  estimated=$((newest_size + newest_size / 2))
+  ((estimated > required_free)) && required_free=$estimated
+fi
+free_bytes=$(df -B1 --output=avail "$backup_dest" | awk 'NR==2 {print $1}')
+if [[ $free_bytes =~ ^[0-9]+$ ]] && ((free_bytes < required_free)); then
+  echo "Not enough free space at $backup_dest: $((free_bytes / 1024 / 1024 / 1024)) GiB available," \
+    "need at least $((required_free / 1024 / 1024 / 1024)) GiB" >&2
+  exit 1
+fi
+
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 archive="$backup_dest/ai-node-$stamp.tar.zst"
 partial="$archive.partial"
@@ -38,7 +54,16 @@ paused=()
 
 unpause_services() {
   if ((${#paused[@]})); then
-    "${compose[@]}" unpause "${paused[@]}" >/dev/null 2>&1 || true
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      if "${compose[@]}" unpause "${paused[@]}"; then
+        paused=()
+        return 0
+      fi
+      echo "WARNING: unpause attempt $attempt failed; retrying in 2s" >&2
+      sleep 2
+    done
+    echo "ERROR: services may still be paused: ${paused[*]} (run: docker compose unpause ${paused[*]})" >&2
     paused=()
   fi
 }
@@ -70,6 +95,7 @@ if ! tar --zstd --acls --xattrs -cpf "$partial" \
   --exclude='ai-node/data/backup-status' \
   --exclude='ai-node/data/node-exporter-textfile' \
   --exclude='ai-node/logs' \
+  --exclude='ai-node/agent-platform/cache' \
   --exclude='backups' \
   -C /srv ai-node repos; then
   exit 1
@@ -116,9 +142,17 @@ else
   echo "WARNING: backup succeeded but creating its Prometheus metric failed" >&2
 fi
 
-find "$backup_dest" -maxdepth 1 -type f \
-  \( -name 'ai-node-*.tar.zst' -o -name 'ai-node-*.tar.zst.sha256' -o -name 'ai-node-*.partial' \) \
-  -mtime +14 -delete
+# Retention: expire archives older than 14 days, but always keep the newest 3.
+cutoff=$(( $(date +%s) - 14 * 86400 ))
+index=0
+while IFS= read -r old_archive; do
+  index=$((index + 1))
+  ((index > 3)) || continue
+  if (( $(stat -c %Y "$old_archive") < cutoff )); then
+    rm -f -- "$old_archive" "$old_archive.sha256"
+  fi
+done < <(find "$backup_dest" -maxdepth 1 -type f -name 'ai-node-*.tar.zst' -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+find "$backup_dest" -maxdepth 1 -type f -name 'ai-node-*.partial' -mtime +14 -delete
 echo "Created $archive"
 if [[ $backup_dest == /srv/backups/* ]]; then
   echo "WARNING: this backup is on the same SSD and does not protect against drive failure."

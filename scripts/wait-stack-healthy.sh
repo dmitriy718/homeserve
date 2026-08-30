@@ -11,7 +11,7 @@ report=$(mktemp "${runtime_dir%/}/ai-node-stack-health.XXXXXX")
 trap 'rm -f -- "$report"' EXIT
 
 for _ in $(seq 1 60); do
-  if /srv/ai-node/scripts/health-check.sh >"$report" 2>&1; then
+  if /srv/ai-node/scripts/health-check.sh --services-only >"$report" 2>&1; then
     cat "$report"
     exit 0
   fi

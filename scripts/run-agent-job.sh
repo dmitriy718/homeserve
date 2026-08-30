@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Environment:
+#   JOB_TIMEOUT   Wall-clock limit for the job container in seconds (default 1800).
+#                 On expiry the container is stopped and the script fails.
+# Flags:
+#   --cleanup     Delete /srv/builds/agents/* job directories older than 14 days and exit.
+
+if [[ ${1:-} == --cleanup ]]; then
+  find /srv/builds/agents -mindepth 1 -maxdepth 1 -type d -mtime +14 -print -exec rm -rf -- {} +
+  exit 0
+fi
+
 if (($# < 2)); then
-  echo "Usage: $0 HTTPS_REPOSITORY JOB_ID [COMMAND]" >&2
+  echo "Usage: $0 HTTPS_REPOSITORY JOB_ID [COMMAND] | $0 --cleanup" >&2
   exit 2
 fi
+
+job_timeout=${JOB_TIMEOUT:-1800}
+[[ $job_timeout =~ ^[0-9]+$ ]] || { echo "JOB_TIMEOUT must be a positive integer (seconds)" >&2; exit 2; }
 
 repo=$1
 job_id=$2
@@ -31,7 +45,8 @@ docker run --rm \
   -v "$workspace:/workspace" \
   alpine/git:2.49.1 clone --depth 1 "$repo" /workspace
 
-docker run --rm \
+timeout --kill-after=30s "${job_timeout}s" \
+  docker run --rm \
   --user "1000:1000" \
   --read-only \
   --cap-drop ALL \
@@ -40,6 +55,7 @@ docker run --rm \
   --memory 4g \
   --cpus 4 \
   --network none \
+  --stop-timeout 15 \
   --tmpfs /tmp:rw,noexec,nosuid,size=512m \
   -e HOME=/tmp/home \
   -v "$workspace:/workspace:rw" \
