@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly AI node restore test
+
+[Timer]
+OnCalendar=*-*-01 05:30:00 America/New_York
+RandomizedDelaySec=30m
+Persistent=true
+Unit=ai-node-restore-test.service
+
+[Install]
+WantedBy=timers.target

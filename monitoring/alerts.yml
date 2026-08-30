@@ -126,3 +126,39 @@ groups:
         annotations:
           summary: "Root filesystem inodes are over 85% used"
           description: "Inode exhaustion blocks new files even when space remains; prune Docker layers and logs."
+
+      - alert: OffsiteBackupStale
+        expr: time() - ai_node_offsite_backup_last_success_unixtime_seconds > 172800
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No offsite backup in 48 hours"
+          description: "The restic offsite backup is stale; inspect ai-node-offsite-backup.service. If this metric is absent entirely, offsite backups are not configured; see secrets/restic.env.example to enable them."
+
+      - alert: RestoreTestFailed
+        expr: ai_node_restore_test_success == 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Automated restore test failed"
+          description: "The newest local backup archive failed verification or content spot-checks; inspect ai-node-restore-test.service and the archives in /srv/backups/local."
+
+      - alert: OnBatteryPower
+        expr: ai_node_battery_on_ac == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host is running on battery"
+          description: "The host has been on battery for five minutes; this indicates a power outage or an unplugged charger."
+
+      - alert: BatteryLow
+        expr: ai_node_battery_capacity_percent < 20 and ai_node_battery_on_ac == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Battery below 20% while on battery power"
+          description: "The host will shut down soon unless AC power returns; plan a graceful shutdown with systemctl poweroff."
