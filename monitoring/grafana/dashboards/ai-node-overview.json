@@ -33,7 +33,7 @@
       "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
       "id": 3,
       "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
-      "targets": [{"expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"})", "refId": "A"}],
+      "targets": [{"expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/rootfs\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{mountpoint=\"/rootfs\",fstype!~\"tmpfs|overlay\"})", "refId": "A"}],
       "title": "Root Filesystem Used",
       "type": "stat"
     },
