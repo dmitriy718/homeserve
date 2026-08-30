@@ -2,6 +2,8 @@ services:
   agent-gateway:
     env_file: !reset []
     environment:
+      # Blank the file-based key so app.py exercises its env-var fallback here.
+      AGENT_GATEWAY_KEY_FILE: ""
       AGENT_GATEWAY_KEY: validation-only-key-000000000000000000000000
   grafana:
     env_file: !reset []
@@ -12,3 +14,10 @@ services:
     env_file: !reset []
     environment:
       APP_KEY: base64:dmFsaWRhdGlvbi1vbmx5LWtleS0wMDAwMDAwMA==
+
+# The real key file is git-ignored and absent in CI; point the Docker secret at
+# the committed placeholder so `docker compose config` resolves. The gateway
+# still gets its key from AGENT_GATEWAY_KEY above (app.py env fallback).
+secrets:
+  agent_gateway_key:
+    file: ../secrets/agent-gateway.key.example
