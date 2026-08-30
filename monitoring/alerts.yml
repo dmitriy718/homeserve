@@ -20,7 +20,7 @@ groups:
           description: "Blackbox probe {{ $labels.instance }} has failed for two minutes."
 
       - alert: RootFilesystemNearlyFull
-        expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) > 85
+        expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/rootfs",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/rootfs",fstype!~"tmpfs|overlay"}) > 85
         for: 10m
         labels:
           severity: warning
@@ -72,3 +72,57 @@ groups:
         annotations:
           summary: "Backup success metric is missing"
           description: "No backup success metric has been published for more than 26 hours."
+
+      - alert: NvmeMediaErrors
+        expr: ai_node_nvme_media_errors > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NVMe media errors detected"
+          description: "The NVMe device reports media and data integrity errors; check smartctl and schedule a replacement."
+
+      - alert: NvmeWearHigh
+        expr: ai_node_nvme_percentage_used > 80
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "NVMe wear is over 80%"
+          description: "The NVMe device has consumed over 80% of its rated endurance; plan for a replacement."
+
+      - alert: NvmeCriticalWarning
+        expr: ai_node_nvme_critical_warning != 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NVMe critical warning is set"
+          description: "The NVMe device has set its critical warning flag; inspect smartctl -H immediately."
+
+      - alert: OomKillsDetected
+        expr: increase(node_vmstat_oom_kill[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OOM killer terminated processes"
+          description: "The kernel OOM killer has terminated processes in the last hour; review memory limits."
+
+      - alert: SwapUsageHigh
+        expr: 100 * (1 - node_memory_SwapFree_bytes / (node_memory_SwapTotal_bytes > 0)) > 75
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap usage is over 75%"
+          description: "Sustained swap pressure hurts latency on a single-host stack; review container memory limits."
+
+      - alert: RootInodesNearlyFull
+        expr: 100 * (1 - node_filesystem_files_free{mountpoint="/rootfs",fstype!~"tmpfs|overlay"} / node_filesystem_files{mountpoint="/rootfs",fstype!~"tmpfs|overlay"}) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem inodes are over 85% used"
+          description: "Inode exhaustion blocks new files even when space remains; prune Docker layers and logs."

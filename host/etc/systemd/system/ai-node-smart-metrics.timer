@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly NVMe SMART metrics collection
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+Unit=ai-node-smart-metrics.service
+
+[Install]
+WantedBy=timers.target

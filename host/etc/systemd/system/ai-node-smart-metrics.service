@@ -1,0 +1,9 @@
+[Unit]
+Description=NVMe SMART metrics for the node-exporter textfile collector
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/smart-metrics.sh
+Nice=10
+UMask=0022
+TimeoutStartSec=60
