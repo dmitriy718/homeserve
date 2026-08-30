@@ -18,6 +18,13 @@ services:
     <<: *common
     image: ollama/ollama:0.32.6
     container_name: ai-ollama
+    # App manifest labels — see docs/APP_MANIFEST.md. Everything downstream
+    # (probes, dashboard tiles, health checks, backup pauses) derives from these.
+    labels:
+      homeserv.name: "Ollama"
+      homeserv.purpose: "LLM inference API"
+      homeserv.legacy.port: "11434"
+      homeserv.probe.url: "http://ollama:11434/api/tags"
     gpus: all
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
@@ -44,6 +51,13 @@ services:
       context: ../services/agent-gateway
     image: local/ai-node-agent-gateway:1.1
     container_name: ai-agent-gateway
+    labels:
+      homeserv.name: "Agent Gateway"
+      homeserv.purpose: "Scoped tool API for agent jobs"
+      homeserv.subdomain: "gateway"
+      homeserv.legacy.port: "8090"
+      homeserv.probe.url: "http://agent-gateway:8090/health"
+      homeserv.backup.pause: "true"
     user: "1000:1000"
     read_only: true
     cap_drop: [ALL]
@@ -76,6 +90,13 @@ services:
     <<: *common
     image: ghcr.io/open-webui/open-webui:v0.11.0
     container_name: ai-open-webui
+    labels:
+      homeserv.name: "Open WebUI"
+      homeserv.purpose: "Chat UI for local models"
+      homeserv.subdomain: "webui"
+      homeserv.legacy.port: "3000"
+      homeserv.probe.url: "http://open-webui:8080/health"
+      homeserv.backup.pause: "true"
     depends_on:
       ollama:
         condition: service_healthy
@@ -112,6 +133,11 @@ services:
       context: ../services/embedding
     image: local/ai-node-embeddings:1.1
     container_name: ai-embeddings
+    labels:
+      homeserv.name: "Embeddings"
+      homeserv.purpose: "OpenAI-compatible embeddings API"
+      homeserv.legacy.port: "8081"
+      homeserv.probe.url: "http://embeddings:8080/health"
     environment:
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       MODEL_CACHE: /models
@@ -142,6 +168,13 @@ services:
         COMFYUI_TAG: v0.31.0
     image: local/ai-node-comfyui:0.31.0
     container_name: ai-comfyui
+    labels:
+      homeserv.name: "ComfyUI"
+      homeserv.purpose: "Image generation workflows"
+      homeserv.subdomain: "comfy"
+      homeserv.legacy.port: "8188"
+      homeserv.probe.url: "http://comfyui:8188/system_stats"
+      homeserv.backup.pause: "true"
     gpus: all
     environment:
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
@@ -168,6 +201,12 @@ services:
     <<: *common
     image: prom/prometheus:v3.13.2
     container_name: monitor-prometheus
+    labels:
+      homeserv.name: "Prometheus"
+      homeserv.purpose: "Metrics and alert evaluation"
+      homeserv.subdomain: "prom"
+      homeserv.legacy.port: "9091"
+      homeserv.probe.url: "http://prometheus:9090/-/healthy"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -177,6 +216,9 @@ services:
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      # Label-discovered blackbox probe targets written by
+      # scripts/discover-services.sh (file_sd; see docs/APP_MANIFEST.md).
+      - ../monitoring/targets.d:/etc/prometheus/targets.d:ro
       - /srv/ai-node/data/prometheus:/prometheus
     # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
@@ -195,6 +237,9 @@ services:
     <<: *common
     image: prom/alertmanager:v0.29.0
     container_name: monitor-alertmanager
+    labels:
+      homeserv.name: "Alertmanager"
+      homeserv.purpose: "Alert routing and notification dispatch"
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -214,6 +259,13 @@ services:
     <<: *common
     image: binwiederhier/ntfy:v2.14.0
     container_name: monitor-ntfy
+    labels:
+      homeserv.name: "ntfy"
+      homeserv.purpose: "Alert notifications to your phone"
+      homeserv.subdomain: "ntfy"
+      homeserv.legacy.port: "2586"
+      # No homeserv.probe.url: not attached to the scrape network, so the
+      # blackbox exporter cannot reach it (probed via its legacy port instead).
     command: serve
     environment:
       NTFY_BASE_URL: https://ntfy.${BASE_DOMAIN:-homeserve.lan}
@@ -239,6 +291,13 @@ services:
     <<: *common
     image: grafana/grafana:13.1.3
     container_name: monitor-grafana
+    labels:
+      homeserv.name: "Grafana"
+      homeserv.purpose: "Metrics dashboards"
+      homeserv.subdomain: "grafana"
+      homeserv.legacy.port: "3001"
+      homeserv.probe.url: "http://grafana:3000/api/health"
+      homeserv.backup.pause: "true"
     depends_on:
       prometheus:
         condition: service_healthy
@@ -317,6 +376,13 @@ services:
     <<: *common
     image: louislam/uptime-kuma:2.5.0
     container_name: monitor-uptime-kuma
+    labels:
+      homeserv.name: "Uptime Kuma"
+      homeserv.purpose: "Uptime monitoring and status pages"
+      homeserv.subdomain: "kuma"
+      homeserv.legacy.port: "3002"
+      homeserv.probe.url: "http://uptime-kuma:3001/"
+      homeserv.backup.pause: "true"
     volumes:
       - /srv/ai-node/data/uptime-kuma:/app/data
     # Legacy direct access; the Caddy proxy is the front door for UIs.
@@ -336,6 +402,12 @@ services:
     <<: *common
     image: lscr.io/linuxserver/speedtest-tracker:1.14.7
     container_name: monitor-speedtest
+    labels:
+      homeserv.name: "Speedtest"
+      homeserv.purpose: "Daily Internet speed history"
+      homeserv.legacy.port: "8765"
+      homeserv.probe.url: "http://speedtest-tracker/"
+      homeserv.backup.pause: "true"
     # LinuxServer's s6-overlay must remain PID 1.
     init: false
     env_file:
@@ -372,6 +444,11 @@ services:
     <<: *common
     image: lldap/lldap:v0.6.3-alpine
     container_name: auth-lldap
+    labels:
+      homeserv.name: "LLDAP"
+      homeserv.purpose: "LDAP user backend for single sign-on"
+      # No homeserv.subdomain: the lldap. site exists in Caddy, but this is an
+      # admin backend and deliberately gets no dashboard tile.
     env_file:
       - ../secrets/lldap.env
     environment:
@@ -395,6 +472,11 @@ services:
     <<: *common
     image: authelia/authelia:4.39.20
     container_name: auth-authelia
+    labels:
+      homeserv.name: "Authelia SSO"
+      homeserv.purpose: "Sign-on portal — the protected services below redirect here before letting you in"
+      homeserv.subdomain: "auth"
+      # No legacy port and no probe: reachable only through Caddy.
     depends_on:
       lldap:
         condition: service_healthy
@@ -425,6 +507,10 @@ services:
     <<: *common
     image: caddy:2.10.2-alpine
     container_name: edge-caddy
+    labels:
+      homeserv.name: "Caddy"
+      homeserv.purpose: "Reverse proxy, TLS, and SSO front door"
+      # No subdomain/port/probe labels: infra, no dashboard tile.
     environment:
       BASE_DOMAIN: ${BASE_DOMAIN:-homeserve.lan}
     volumes:

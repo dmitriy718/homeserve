@@ -46,15 +46,42 @@ else
   failures=$((failures + 1))
 fi
 
-check_url "Ollama API" "${base}:11434/api/tags"
-check_url "Open WebUI" "${base}:3000/health"
-check_url "Embeddings" "${base}:8081/health"
-check_url "ComfyUI" "${base}:8188/system_stats"
-check_url "Agent Gateway" "${base}:8090/health"
-check_url "Prometheus" "${base}:9091/-/healthy"
-check_url "Grafana" "${base}:3001/api/health"
-check_url "Uptime Kuma" "${base}:3002/"
-check_url "Speedtest Tracker" "${base}:8765/"
+# Service URL checks derive from homeserv.* container labels when Docker is
+# reachable (docs/APP_MANIFEST.md): each running container with both
+# homeserv.probe.url and homeserv.legacy.port is probed from the host at
+# http://LAN_IP:<legacy.port><probe path>. Falls back to a static list when
+# Docker is unreachable or no labels are found (e.g. before the stack exists).
+dynamic_checks_done=false
+if docker info >/dev/null 2>&1; then
+  labeled=$(docker ps -q --filter label=homeserv.probe.url --filter label=homeserv.legacy.port)
+  rows=""
+  if [[ -n $labeled ]]; then
+    # shellcheck disable=SC2086
+    rows=$(docker inspect $labeled | jq -r '
+      [ .[] | .Config.Labels as $l
+        | { name: $l["homeserv.name"],
+            port: $l["homeserv.legacy.port"],
+            path: ($l["homeserv.probe.url"] | sub("^https?://[^/]*"; "")) } ]
+      | sort_by(.name) | .[] | [.name, .port, .path] | @tsv') || rows=""
+  fi
+  if [[ -n $rows ]]; then
+    dynamic_checks_done=true
+    while IFS=$'\t' read -r name port path; do
+      check_url "$name" "${base}:${port}${path}"
+    done <<< "$rows"
+  fi
+fi
+if ! $dynamic_checks_done; then
+  check_url "Ollama API" "${base}:11434/api/tags"
+  check_url "Open WebUI" "${base}:3000/health"
+  check_url "Embeddings" "${base}:8081/health"
+  check_url "ComfyUI" "${base}:8188/system_stats"
+  check_url "Agent Gateway" "${base}:8090/health"
+  check_url "Prometheus" "${base}:9091/-/healthy"
+  check_url "Grafana" "${base}:3001/api/health"
+  check_url "Uptime Kuma" "${base}:3002/"
+  check_url "Speedtest Tracker" "${base}:8765/"
+fi
 
 if ! $services_only; then
   root_used=$(df --output=pcent / | awk 'NR==2 {gsub(/%/, ""); print $1}')
