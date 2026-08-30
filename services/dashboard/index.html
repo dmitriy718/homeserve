@@ -125,7 +125,9 @@ const SERVICES = [
   { name: "Agent Gateway",  purpose: "Scoped tool API for agent jobs",      sub: "gateway", port: 8090,  probe: "/health" },
   { name: "Ollama",         purpose: "LLM inference API",                   sub: null,      port: 11434, probe: "/api/tags" },
   { name: "Embeddings",     purpose: "OpenAI-compatible embeddings API",    sub: null,      port: 8081,  probe: "/health" },
-  { name: "Speedtest",      purpose: "Daily Internet speed history",        sub: null,      port: 8765,  probe: "/" }
+  { name: "Speedtest",      purpose: "Daily Internet speed history",        sub: null,      port: 8765,  probe: "/" },
+  // Internal only (loopback publish, no subdomain): no links, no status dot.
+  { name: "GPU Scheduler",  purpose: "GPU lease arbiter — see Grafana",     sub: null,      port: null,  probe: null }
 ];
 
 const grid = document.getElementById("grid");
@@ -142,7 +144,9 @@ function renderServices(services, baseDomain) {
       ? `<a href="${proxyUrl}">${svc.sub}.${baseDomain}</a><a class="legacy" href="${legacyUrl}">:${svc.port}</a>`
       : proxyUrl
         ? `<a href="${proxyUrl}">${svc.sub}.${baseDomain}</a>`
-        : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
+        : legacyUrl
+          ? `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`
+          : "";
 
     // Name/purpose may come from container labels, so they go in as text.
     const heading = document.createElement("h2");

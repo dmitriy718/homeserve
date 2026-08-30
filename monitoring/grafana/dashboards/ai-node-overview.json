@@ -96,6 +96,19 @@
       "targets": [{"expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)", "refId": "A"}],
       "title": "Firing Alerts",
       "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 4}]}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 20},
+      "id": 10,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [
+        {"expr": "gpu_lease_queue_depth", "legendFormat": "queue depth", "refId": "A"},
+        {"expr": "gpu_lease_active", "legendFormat": "holder: {{holder}} ({{kind}})", "refId": "B"}
+      ],
+      "title": "GPU Lease",
+      "type": "stat"
     }
   ],
   "refresh": "30s",
@@ -107,6 +120,6 @@
   "timezone": "browser",
   "title": "AI Node Overview",
   "uid": "ai-node-overview",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
