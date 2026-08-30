@@ -2,13 +2,18 @@
 
 `homeserv` is an Ubuntu 26.04 headless laptop server providing GPU inference, development workers, monitoring, and persistent application storage. Application workloads are managed by Docker Compose; host changes and all non-secret stack configuration are recorded in this repository.
 
+## Quickstart (new hosts)
+
+On a fresh Ubuntu 24.04+ machine, clone this repository and run `sudo scripts/install.sh`. It installs prerequisites, renders `.env`, generates secrets, installs the systemd units, validates the configuration, and starts the stack. See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full walkthrough.
+
 ## Access and network boundary
 
 - LAN: `192.168.1.68` on Wi-Fi; SSH with `ssh dima@homeserv` or `ssh dima@192.168.1.68`.
 - Tailscale: `100.65.105.46`; SSH with `ssh dima@100.65.105.46`.
 - Application URLs and ports are listed in [SERVICE_MAP.md](SERVICE_MAP.md).
+- Front door: a Caddy proxy publishes `80`/`443` on both addresses and serves every UI with automatic internal TLS on subdomains of `BASE_DOMAIN` (default `homeserve.lan`): `webui.`, `comfy.`, `grafana.`, `kuma.`, `prom.`, `gateway.`, `ntfy.`, plus a static landing dashboard at the bare domain. DNS and CA-trust setup are documented in [config/caddy/Caddyfile](config/caddy/Caddyfile). The legacy per-service ports remain published for direct access.
 - Container ports bind only to the LAN and Tailscale addresses. UFW denies unsolicited inbound traffic by default and permits the application ports only from `192.168.1.0/24` or `tailscale0`.
-- Open WebUI and Grafana anonymous viewing are intentionally usable only inside those trusted networks. Do not forward these ports at the router.
+- Open WebUI and Grafana require login (Grafana admin credentials are generated on install; Open WebUI's first registered account becomes admin). Do not forward these ports at the router.
 
 ## Architecture and storage
 
@@ -62,7 +67,7 @@ The August 2026 hardening and usefulness pass is recorded as [exactly 25 scoped 
 
 Ollama's API is `http://192.168.1.68:11434` (or the Tailscale address). List models with `docker exec ai-ollama ollama list`; add one deliberately with `docker exec ai-ollama ollama pull MODEL`. Check free SSD space first and avoid loading multiple large models on this 16 GB system.
 
-Open WebUI connects to Ollama on the private Docker network. It runs with WebUI authentication disabled because the host firewall and address bindings define the trust boundary.
+Open WebUI connects to Ollama on the private Docker network. WebUI authentication is enabled: on first run, temporarily set `ENABLE_SIGNUP: "True"` in `compose/ai-node.yml`, register the first account (it becomes the admin), then set it back to `"False"` and recreate the container.
 
 The embedding API is OpenAI-compatible:
 
@@ -91,7 +96,7 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 ## Monitoring
 
-Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
+Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Firing alerts go to Alertmanager, which posts them to the self-hosted ntfy service (`http://192.168.1.68:2586` or `https://ntfy.homeserve.lan`): subscribe with the ntfy phone app to topics `homeserve-alerts` and `homeserve-alerts-critical`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts, and requires the generated admin login. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
 
 Generated Grafana, Speedtest Tracker, and Uptime Kuma credentials are stored only in `/srv/ai-node/secrets/*.env` and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 

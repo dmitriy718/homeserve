@@ -25,6 +25,7 @@ services:
       OLLAMA_FLASH_ATTENTION: "1"
     volumes:
       - /srv/models/ollama:/root/.ollama
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:11434:11434"
       - "${TAILSCALE_IP}:11434:11434"
@@ -35,7 +36,7 @@ services:
       retries: 5
       start_period: 20s
     mem_limit: 8g
-    networks: [ai, monitoring]
+    networks: [ai, scrape]
 
   agent-gateway:
     <<: *common
@@ -48,15 +49,17 @@ services:
     cap_drop: [ALL]
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m,mode=1777
-    env_file:
-      - ../secrets/agent-gateway.env
     environment:
       WORKSPACE_ROOT: /srv/agent-workspaces
       ARTIFACT_ROOT: /srv/agent-artifacts
+      AGENT_GATEWAY_KEY_FILE: /run/secrets/agent_gateway_key
+    secrets:
+      - agent_gateway_key
     volumes:
       - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
       - /srv/ai-node/agent-platform/artifacts:/srv/agent-artifacts
       - /srv/ai-node/agent-platform/cache:/srv/agent-cache
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:8090:8090"
       - "${TAILSCALE_IP}:8090:8090"
@@ -67,7 +70,7 @@ services:
       retries: 5
     mem_limit: 512m
     cpus: 2
-    networks: [ai, monitoring]
+    networks: [ai, scrape]
 
   open-webui:
     <<: *common
@@ -78,7 +81,10 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      WEBUI_AUTH: "False"
+      # First run: temporarily set ENABLE_SIGNUP to "True", register the first
+      # account (it becomes the admin), then set it back to "False" and
+      # recreate the container.
+      WEBUI_AUTH: "True"
       ENABLE_SIGNUP: "False"
       ENABLE_OPENAI_API: "False"
       ENABLE_OLLAMA_API: "True"
@@ -87,6 +93,7 @@ services:
     volumes:
       - /srv/ai-node/data/open-webui:/app/backend/data
       - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:3000:8080"
       - "${TAILSCALE_IP}:3000:8080"
@@ -97,7 +104,7 @@ services:
       retries: 10
       start_period: 60s
     mem_limit: 2g
-    networks: [ai, monitoring]
+    networks: [ai, scrape]
 
   embeddings:
     <<: *common
@@ -113,6 +120,7 @@ services:
       MAX_EMBEDDING_CHARS: "50000"
     volumes:
       - /srv/models/embeddings:/models
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:8081:8080"
       - "${TAILSCALE_IP}:8081:8080"
@@ -124,7 +132,7 @@ services:
       start_period: 120s
     cpus: 4
     mem_limit: 2g
-    networks: [ai, monitoring]
+    networks: [ai, scrape]
 
   comfyui:
     <<: *common
@@ -143,6 +151,7 @@ services:
       - /srv/ai-node/data/comfyui/input:/opt/ComfyUI/input
       - /srv/ai-node/data/comfyui/output:/opt/ComfyUI/output
       - /srv/ai-node/data/comfyui/user:/opt/ComfyUI/user
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:8188:8188"
       - "${TAILSCALE_IP}:8188:8188"
@@ -153,7 +162,7 @@ services:
       retries: 10
       start_period: 120s
     mem_limit: 8g
-    networks: [ai, monitoring]
+    networks: [ai, scrape]
 
   prometheus:
     <<: *common
@@ -164,11 +173,12 @@ services:
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
       - --storage.tsdb.retention.size=5GB
-      - --web.enable-lifecycle
+      # No --web.enable-lifecycle: reload config with a container restart.
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - /srv/ai-node/data/prometheus:/prometheus
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:9091:9090"
       - "${TAILSCALE_IP}:9091:9090"
@@ -179,6 +189,50 @@ services:
       retries: 5
       start_period: 15s
     mem_limit: 1g
+    networks: [monitoring, scrape]
+
+  alertmanager:
+    <<: *common
+    image: prom/alertmanager:v0.29.0
+    container_name: monitor-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /srv/ai-node/data/alertmanager:/alertmanager
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 128m
+    networks: [monitoring]
+
+  ntfy:
+    <<: *common
+    image: binwiederhier/ntfy:v2.14.0
+    container_name: monitor-ntfy
+    command: serve
+    environment:
+      NTFY_BASE_URL: https://ntfy.${BASE_DOMAIN:-homeserve.lan}
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_ATTACHMENT_CACHE_DIR: /var/cache/ntfy/attachments
+    volumes:
+      - /srv/ai-node/data/ntfy:/var/cache/ntfy
+    # Published so phones/desktops can subscribe with the ntfy app directly.
+    ports:
+      - "${LAN_IP}:2586:80"
+      - "${TAILSCALE_IP}:2586:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/v1/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
     networks: [monitoring]
 
   grafana:
@@ -192,8 +246,6 @@ services:
       - ../secrets/grafana.env
     environment:
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -201,6 +253,7 @@ services:
       - /srv/ai-node/data/grafana:/var/lib/grafana
       - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/grafana/dashboards:/var/lib/grafana-dashboards:ro
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:3001:3000"
       - "${TAILSCALE_IP}:3001:3000"
@@ -211,7 +264,7 @@ services:
       retries: 5
       start_period: 30s
     mem_limit: 512m
-    networks: [monitoring]
+    networks: [monitoring, scrape]
 
   node-exporter:
     <<: *common
@@ -230,7 +283,7 @@ services:
       - /:/rootfs:ro,rslave
       - /srv/ai-node/data/node-exporter-textfile:/textfile:ro
     mem_limit: 128m
-    networks: [monitoring]
+    networks: [scrape]
 
   blackbox-exporter:
     <<: *common
@@ -241,7 +294,7 @@ services:
       - ../monitoring/blackbox.yml:/config/blackbox.yml:ro
     command: ["--config.file=/config/blackbox.yml"]
     mem_limit: 128m
-    networks: [monitoring]
+    networks: [scrape]
 
   nvidia-exporter:
     <<: *common
@@ -258,7 +311,7 @@ services:
       timeout: 10s
       retries: 5
     mem_limit: 128m
-    networks: [monitoring]
+    networks: [scrape]
 
   uptime-kuma:
     <<: *common
@@ -266,6 +319,7 @@ services:
     container_name: monitor-uptime-kuma
     volumes:
       - /srv/ai-node/data/uptime-kuma:/app/data
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:3002:3001"
       - "${TAILSCALE_IP}:3002:3001"
@@ -276,7 +330,7 @@ services:
       retries: 5
       start_period: 30s
     mem_limit: 512m
-    networks: [monitoring]
+    networks: [monitoring, scrape]
 
   speedtest-tracker:
     <<: *common
@@ -296,6 +350,7 @@ services:
       DISPLAY_TIMEZONE: ${TZ}
     volumes:
       - /srv/ai-node/data/speedtest:/config
+    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:8765:80"
       - "${TAILSCALE_IP}:8765:80"
@@ -306,7 +361,32 @@ services:
       retries: 5
       start_period: 60s
     mem_limit: 1g
-    networks: [monitoring]
+    networks: [monitoring, scrape]
+
+  caddy:
+    <<: *common
+    image: caddy:2.10.2-alpine
+    container_name: edge-caddy
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN:-homeserve.lan}
+    volumes:
+      - ../config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../services/dashboard:/srv:ro
+      - /srv/ai-node/data/caddy/data:/data
+      - /srv/ai-node/data/caddy/config:/config
+    ports:
+      - "${LAN_IP}:80:80"
+      - "${LAN_IP}:443:443"
+      - "${TAILSCALE_IP}:80:80"
+      - "${TAILSCALE_IP}:443:443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 128m
+    networks: [ai, monitoring]
 
   playwright:
     build:
@@ -329,5 +409,13 @@ networks:
     name: ai-node-ai
   monitoring:
     name: ai-node-monitoring
+  # Prometheus-only path to exporters and blackbox-probed services, so the
+  # data plane (ai) and the monitoring UI plane stay off each other.
+  scrape:
+    name: ai-node-scrape
   dev:
     name: ai-node-dev
+
+secrets:
+  agent_gateway_key:
+    file: ../secrets/agent-gateway.key

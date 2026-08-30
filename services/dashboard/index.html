@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homeserve</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262b36;
+    --text: #e6e8ec;
+    --muted: #8b93a1;
+    --accent: #6ea8fe;
+    --up: #3fb950;
+    --down: #f85149;
+    --unknown: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+  header h1 { font-size: 1.6rem; margin: 0 0 .25rem; font-weight: 650; }
+  header p { color: var(--muted); margin: 0 0 2rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+  }
+  .tile h2 {
+    font-size: 1rem;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-weight: 600;
+  }
+  .dot {
+    width: .6rem; height: .6rem;
+    border-radius: 50%;
+    background: var(--unknown);
+    flex: none;
+  }
+  .dot.up { background: var(--up); }
+  .dot.down { background: var(--down); }
+  .tile .purpose { color: var(--muted); font-size: .85rem; margin: 0; flex: 1; }
+  .tile .links { display: flex; gap: 1rem; font-size: .85rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .links .legacy { color: var(--muted); }
+  section.docs { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
+  section.docs h2 { color: var(--text); font-size: 1rem; font-weight: 600; margin: 0 0 .5rem; }
+  section.docs ul { margin: 0; padding-left: 1.2rem; }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .8rem; }
+  code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: .1em .35em; font-size: .85em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>homeserve</h1>
+    <p>Home server services. Status dots probe the legacy HTTP ports and may show
+       &ldquo;unknown&rdquo; when this page is loaded over HTTPS (browsers block
+       plain-HTTP probes from secure pages).</p>
+  </header>
+
+  <div class="grid" id="grid"></div>
+
+  <noscript>
+    <p>Enable JavaScript for status dots. Services: Open WebUI (webui), ComfyUI
+       (comfy), Grafana (grafana), Uptime Kuma (kuma), Prometheus (prom),
+       Agent Gateway (gateway), ntfy (ntfy) — all as subdomains of
+       homeserve.lan, or via the legacy ports in SERVICE_MAP.md.</p>
+  </noscript>
+
+  <section class="docs">
+    <h2>Docs</h2>
+    <p>Local, in the repository at <code>/srv/ai-node</code> — not hosted:</p>
+    <ul>
+      <li><code>docs/QUICKSTART.md</code> — install and first-run walkthrough</li>
+      <li><code>SERVICE_MAP.md</code> — every service, port, and data path</li>
+      <li><code>README.md</code> — architecture, operation, backup/restore</li>
+      <li><code>docs/AGENT_ISOLATION.md</code> — agent sandbox model</li>
+      <li><code>docs/BASELINE.md</code> — host baseline record</li>
+    </ul>
+  </section>
+
+  <footer>
+    TLS is provided by Caddy's internal CA — see
+    <code>config/caddy/Caddyfile</code> for how to trust it on your devices.
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+// LAN address for the legacy direct ports (kept for migration; the proxy
+// subdomains are the front door). Matches LAN_IP in /srv/ai-node/.env.
+const LEGACY_HOST = "192.168.1.68";
+const BASE_DOMAIN = "homeserve.lan";
+
+const SERVICES = [
+  { name: "Open WebUI",     purpose: "Chat UI for local models",            sub: "webui",   port: 3000,  probe: "/health" },
+  { name: "ComfyUI",        purpose: "Image generation workflows",          sub: "comfy",   port: 8188,  probe: "/system_stats" },
+  { name: "Grafana",        purpose: "Metrics dashboards",                  sub: "grafana", port: 3001,  probe: "/api/health" },
+  { name: "Uptime Kuma",    purpose: "Uptime monitoring and status pages",  sub: "kuma",    port: 3002,  probe: "/" },
+  { name: "Prometheus",     purpose: "Metrics and alert evaluation",        sub: "prom",    port: 9091,  probe: "/-/ready" },
+  { name: "ntfy",           purpose: "Alert notifications to your phone",   sub: "ntfy",    port: 2586,  probe: "/v1/health" },
+  { name: "Agent Gateway",  purpose: "Scoped tool API for agent jobs",      sub: "gateway", port: 8090,  probe: "/health" },
+  { name: "Ollama",         purpose: "LLM inference API",                   sub: null,      port: 11434, probe: "/api/tags" },
+  { name: "Embeddings",     purpose: "OpenAI-compatible embeddings API",    sub: null,      port: 8081,  probe: "/health" },
+  { name: "Speedtest",      purpose: "Daily Internet speed history",        sub: null,      port: 8765,  probe: "/" }
+];
+
+const grid = document.getElementById("grid");
+
+for (const svc of SERVICES) {
+  const tile = document.createElement("div");
+  tile.className = "tile";
+
+  const proxyUrl = svc.sub ? `https://${svc.sub}.${BASE_DOMAIN}` : null;
+  const legacyUrl = `http://${LEGACY_HOST}:${svc.port}`;
+
+  const links = proxyUrl
+    ? `<a href="${proxyUrl}">${svc.sub}.${BASE_DOMAIN}</a><a class="legacy" href="${legacyUrl}">:${svc.port}</a>`
+    : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
+
+  tile.innerHTML =
+    `<h2><span class="dot" title="status unknown"></span>${svc.name}</h2>` +
+    `<p class="purpose">${svc.purpose}</p>` +
+    `<div class="links">${links}</div>`;
+  grid.appendChild(tile);
+
+  // Rough liveness probe against the legacy HTTP port. no-cors means we only
+  // learn "something answered", not the status code — good enough for a dot.
+  // From an HTTPS page the browser blocks these probes as mixed content; the
+  // dot then stays gray, which is intentional.
+  const dot = tile.querySelector(".dot");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  fetch(`${legacyUrl}${svc.probe}`, { mode: "no-cors", signal: controller.signal, cache: "no-store" })
+    .then(() => { dot.classList.add("up"); dot.title = "reachable"; })
+    .catch(() => { dot.title = "unknown (blocked or down)"; })
+    .finally(() => clearTimeout(timer));
+}
+</script>
+</body>
+</html>
