@@ -5,6 +5,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --chmod=0644 app.py .
 COPY --chmod=0644 test_app.py .
 RUN useradd -r -u 10001 agent && mkdir -p /srv/agent-workspaces /srv/agent-artifacts /srv/agent-cache && chown -R agent:agent /srv/agent-workspaces /srv/agent-artifacts /srv/agent-cache
+# Compose overrides the runtime UID (user: "1000:1000"); this default USER only
+# applies when the image is run outside compose and does not conflict with it.
 USER agent
 EXPOSE 8090
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8090"]
