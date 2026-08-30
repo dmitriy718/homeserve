@@ -55,6 +55,12 @@ The stack boot unit can be inspected or reconciled with `systemctl status ai-nod
 
 Update pinned images and locally built services with `/srv/ai-node/scripts/update-stack.sh`. It validates Compose, pulls, rebuilds, restarts, and runs the health check. It deliberately does not delete old images or build cache; review space with `docker system df`, and prune only after confirming rollback images are no longer needed.
 
+### Updates
+
+- Manual stack update: `sudo /srv/ai-node/scripts/update-stack.sh` (pre-update backup, pull/build/restart, health gate, automatic image rollback).
+- Scheduled updates are opt-in: `sudo touch /srv/ai-node/.auto-update` arms the weekly `ai-node-update.timer` (Sunday ~04:00 local, randomized up to 30 minutes). Each run wraps `update-stack.sh`, publishes `ai_node_last_update_success` and `ai_node_last_update_unixtime_seconds` to the node-exporter textfile directory, and posts to the ntfy `homeserve-alerts-critical` topic on failure. Disable with `sudo rm /srv/ai-node/.auto-update`.
+- Repository self-update: `sudo /srv/ai-node/scripts/deploy.sh` fast-forwards the `/srv/ai-node` git checkout (fast-forward only; aborts on divergence or a dirty tree — override the latter with `--force`), re-runs `bootstrap-secrets.sh`, re-installs changed systemd units with a `daemon-reload`, validates with `--strict`, then runs `update-stack.sh`. Preview with `--check` (status only) or `--dry-run` (incoming commits and unit changes, no mutations). It requires `/srv/ai-node` to be a git clone and prints conversion guidance when it is not.
+
 Validate repository and deployment configuration without changing the running stack:
 
 ```bash

@@ -180,4 +180,6 @@ Next steps:
   - Service URLs:       $install_dir/SERVICE_MAP.md
   - Health check:       $install_dir/scripts/health-check.sh
   - Nightly backups:    systemctl list-timers ai-node-backup.timer
+  - Updates:            $install_dir/scripts/deploy.sh (repo + stack; needs a
+                        git checkout) or scripts/update-stack.sh (images only)
 EOF

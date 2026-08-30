@@ -87,13 +87,17 @@ Alert states are also visible at `http://LAN_IP:9091/alerts`.
 ## Updating
 
 ```bash
-cd /srv/ai-node && git pull
-sudo scripts/install.sh   # re-applies units/config; keeps .env and secrets
-/srv/ai-node/scripts/update-stack.sh
+sudo /srv/ai-node/scripts/deploy.sh
 ```
 
-`update-stack.sh` validates, pulls and rebuilds images, restarts, and runs the
-health check.
+`deploy.sh` is the primary update path: it fast-forwards the `/srv/ai-node`
+git checkout, re-runs `bootstrap-secrets.sh`, re-installs changed systemd
+units, validates, and then runs `update-stack.sh` (pulls and rebuilds images,
+restarts, runs the health check). Preview first with `--check` or `--dry-run`.
+For image-only updates without touching the checkout, run
+`/srv/ai-node/scripts/update-stack.sh` directly. `deploy.sh` requires
+`/srv/ai-node` to be a git clone; if `install.sh` rsynced the repository from
+a clone elsewhere (no `.git`), it prints the one-time conversion commands.
 
 ## Backups
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly opt-in AI node stack update
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=ai-node-update.service
+
+[Install]
+WantedBy=timers.target
