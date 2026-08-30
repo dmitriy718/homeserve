@@ -23,6 +23,10 @@ scrape_configs:
     static_configs:
       - targets: ["nvidia-exporter:9400"]
 
+  - job_name: gpu-scheduler
+    static_configs:
+      - targets: ["gpu-scheduler:8077"]
+
   - job_name: blackbox_icmp
     metrics_path: /probe
     params:

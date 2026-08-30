@@ -36,6 +36,7 @@ Authelia single sign-on (Caddy `forward_auth`); log in once at
 | Embeddings | MiniLM OpenAI-compatible embeddings | `ai-embeddings` | 8081 | `http://192.168.1.68:8081` | `http://100.65.105.46:8081` | `/srv/models/embeddings` | No (CPU) | `/health` |
 | ComfyUI | Image workflow UI/API | `ai-comfyui` | 8188 | `http://192.168.1.68:8188` | `http://100.65.105.46:8188` | `/srv/models/comfyui`, `/srv/ai-node/data/comfyui` | Yes | `/system_stats` |
 | Agent Gateway | Scoped tool API for agent jobs | `ai-agent-gateway` | 8090 | `http://192.168.1.68:8090` | `http://100.65.105.46:8090` | `/srv/ai-node/agent-platform` | No | `/health` |
+| GPU Scheduler | Cooperative GPU lease arbiter | `ai-gpu-scheduler` | 8077 (loopback only) | `http://127.0.0.1:8077` (host only) | Not exposed | None (in-memory) | No | `/state` |
 | Prometheus | Metrics and network-probe history | `monitor-prometheus` | 9091 | `http://192.168.1.68:9091` | `http://100.65.105.46:9091` | `/srv/ai-node/data/prometheus` | No | `/-/ready` |
 | Alertmanager | Alert routing to ntfy (internal only) | `monitor-alertmanager` | 9093 internal | Not exposed | Not exposed | `/srv/ai-node/data/alertmanager` | No | `/-/healthy` internally |
 | ntfy | Push notifications for alerts | `monitor-ntfy` | 2586 | `http://192.168.1.68:2586` | `http://100.65.105.46:2586` | `/srv/ai-node/data/ntfy` | No | `/v1/health` |
@@ -56,3 +57,29 @@ the self-hosted ntfy service: subscribe with the ntfy app or
 to the `homeserve-alerts-critical` topic).
 
 The pre-existing Nextcloud, Wekan, and Prometheus-snap workloads were preserved and are not managed by this Compose project.
+
+## Optional apps (`apps/` overlays)
+
+Curated, opt-in compose overlays — **not installed or started by default**,
+and nothing in the base stack depends on them. Enable one by merging its file
+into the compose command (see [docs/APPS.md](docs/APPS.md)):
+
+```bash
+docker compose --env-file .env -f compose/ai-node.yml -f apps/jellyfin.yml up -d
+```
+
+Each overlay carries the full `homeserv.*` label contract, so dashboard
+tiles, Prometheus probes, health checks, and backup pauses pick it up
+automatically once it runs. The Caddy subdomain routes are opt-in too —
+the site block must be added to `config/caddy/Caddyfile` per app (exact
+blocks in docs/APPS.md).
+
+| App | Purpose | Overlay | Port | LAN URL | Subdomain (once routed) | Persistent Data |
+|---|---|---|---:|---|---|---|
+| Jellyfin | Media streaming | `apps/jellyfin.yml` | 8096 | `http://192.168.1.68:8096` | `https://jellyfin.homeserve.lan` | `/srv/ai-node/data/jellyfin`, media read-only from `MEDIA_ROOT` |
+| Immich | Photo & video backup | `apps/immich.yml` | 2283 | `http://192.168.1.68:2283` | `https://immich.homeserve.lan` | `/srv/ai-node/data/immich` |
+| Nextcloud | Files, calendar, contacts | `apps/nextcloud.yml` | 8480 | `http://192.168.1.68:8480` | `https://cloud.homeserve.lan` | `/srv/ai-node/data/nextcloud` |
+
+Combined memory caps of all three apps are ~10 GiB on a 16 GB host already
+running the base stack — see the resource warning in docs/APPS.md before
+enabling all three at once.

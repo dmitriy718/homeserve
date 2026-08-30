@@ -197,6 +197,37 @@ services:
     mem_limit: 8g
     networks: [ai, scrape]
 
+  gpu-scheduler:
+    <<: *common
+    build:
+      context: ../services/gpu-scheduler
+    image: local/ai-node-gpu-scheduler:1.0
+    container_name: ai-gpu-scheduler
+    labels:
+      homeserv.name: "GPU Scheduler"
+      homeserv.purpose: "Cooperative GPU lease arbiter (see docs/GPU_SCHEDULING.md)"
+      homeserv.probe.url: "http://gpu-scheduler:8077/state"
+      # No homeserv.subdomain / legacy.port / backup.pause: an internal
+      # coordinator, not a browser-facing app and safe to back up live
+      # (state is in-memory by design).
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    # Localhost-only publish, unlike the other services: scripts/gpu-lock.sh
+    # and other host-side tooling need the API, but the LAN (and Tailscale)
+    # has no business talking to the lease arbiter.
+    ports:
+      - "127.0.0.1:8077:8077"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8077/state', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 256m
+    networks: [ai, scrape]
+
   prometheus:
     <<: *common
     image: prom/prometheus:v3.13.2

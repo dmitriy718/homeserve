@@ -162,3 +162,23 @@ groups:
         annotations:
           summary: "Battery below 20% while on battery power"
           description: "The host will shut down soon unless AC power returns; plan a graceful shutdown with systemctl poweroff."
+
+  - name: gpu-scheduler
+    rules:
+      - alert: GpuLeaseQueueSaturated
+        expr: gpu_lease_queue_depth > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU lease queue is saturated"
+          description: "More than three workloads have been waiting on the GPU lease for fifteen minutes; check scripts/gpu-lock.sh status and the Grafana AI Node Overview dashboard."
+
+      - alert: GpuLeaseStuck
+        expr: time() - gpu_lease_started_unixtime > 21600
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU lease held for over six hours"
+          description: "Holder {{ $labels.holder }} ({{ $labels.kind }}) has held the GPU lease for over six hours; a client may have forgotten to release it."
