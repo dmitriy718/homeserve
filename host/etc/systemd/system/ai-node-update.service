@@ -1,0 +1,13 @@
+[Unit]
+Description=Opt-in scheduled AI node stack update
+Requires=docker.service
+After=docker.service ai-node-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/ai-node/scripts/auto-update.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+TimeoutStartSec=4h
