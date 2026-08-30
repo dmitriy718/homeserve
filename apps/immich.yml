@@ -1,0 +1,160 @@
+# Immich — optional app overlay. See docs/APPS.md.
+# NOT part of the base stack; combine it explicitly:
+#   docker compose --env-file .env -f compose/ai-node.yml -f apps/immich.yml up -d
+#
+# Requires ../secrets/immich.env (copy apps/immich.env.example and fill it in;
+# the path is relative to this file, so it resolves to secrets/immich.env in
+# the repository root).
+#
+# The x-common anchor in compose/ai-node.yml cannot be referenced across
+# files, so the hardening settings are replicated explicitly below.
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.1.0
+    container_name: app-immich-server
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      homeserv.name: "Immich"
+      homeserv.purpose: "Photo & video backup"
+      homeserv.subdomain: "immich"
+      homeserv.legacy.port: "2283"
+      # Immich v1.118+ ping endpoint (the older /api/server-info/ping is gone).
+      homeserv.probe.url: "http://immich-server:2283/api/server/ping"
+      homeserv.backup.pause: "true"
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    env_file:
+      - ../secrets/immich.env
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_USERNAME: postgres
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: immich-redis
+    volumes:
+      # Uploads and generated thumbnails.
+      - /srv/ai-node/data/immich/upload:/data
+      # Optional: browse/import the media library from Jellyfin as an
+      # external library (read-only). Uncomment to enable.
+      # - ${MEDIA_ROOT:-/srv/media}:/media:ro
+    # Legacy direct access; the Caddy proxy is the front door.
+    ports:
+      - "${LAN_IP}:2283:2283"
+      - "${TAILSCALE_IP}:2283:2283"
+    healthcheck:
+      # The image ships no curl/wget; node (the server runtime) is guaranteed.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2283/api/server/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    mem_limit: 2g
+    networks: [monitoring, scrape, immich]
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.1.0
+    container_name: app-immich-ml
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    # No labels: internal dependency, no dashboard tile/probe/pause.
+    volumes:
+      - /srv/ai-node/data/immich/model-cache:/cache
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    mem_limit: 2g
+    networks: [immich]
+
+  immich-postgres:
+    # Immich's own Postgres build with the VectorChord extension it requires;
+    # a plain postgres/pgvector image will NOT work.
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    container_name: app-immich-postgres
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    env_file:
+      - ../secrets/immich.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    shm_size: 128mb
+    volumes:
+      - /srv/ai-node/data/immich/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d immich || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    mem_limit: 1g
+    networks: [immich]
+
+  immich-redis:
+    image: redis:7-alpine
+    container_name: app-immich-redis
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    networks: [immich]
+
+# monitoring/scrape are created by the base stack (explicit names in
+# compose/ai-node.yml), so they are referenced as external here.
+# The immich network is private to this overlay (becomes ai-node-immich
+# when merged into the base project).
+networks:
+  monitoring:
+    name: ai-node-monitoring
+    external: true
+  scrape:
+    name: ai-node-scrape
+    external: true
+  immich:

@@ -34,7 +34,22 @@ fi
 
 cd /srv/ai-node/compose
 /srv/ai-node/scripts/validate-config.sh --strict
-compose=(docker compose --env-file ../.env -f ai-node.yml)
+
+# Include any apps/ overlay files that are actually in use, so that
+# `up -d --remove-orphans` does not prune app containers. The set of active
+# compose files is read back from a running container's own labels; fall back
+# to the base file only.
+compose=(docker compose --env-file ../.env)
+config_files=$(docker ps --filter label=com.docker.compose.project=ai-node \
+  --format '{{index .Labels "com.docker.compose.project.config_files"}}' 2>/dev/null \
+  | tr ',' '\n' | grep -v '^$' | sort -u || true)
+if [[ -n $config_files ]]; then
+  while IFS= read -r f; do
+    [[ -f $f ]] && compose+=(-f "$f")
+  done <<< "$config_files"
+else
+  compose+=(-f ai-node.yml)
+fi
 declare -A previous_image_ids=()
 
 while IFS=$'\t' read -r service image_ref; do

@@ -56,14 +56,14 @@ unpause_services() {
   if ((${#paused[@]})); then
     local attempt
     for attempt in 1 2 3 4 5; do
-      if "${compose[@]}" unpause "${paused[@]}"; then
+      if docker unpause "${paused[@]}" >/dev/null; then
         paused=()
         return 0
       fi
       echo "WARNING: unpause attempt $attempt failed; retrying in 2s" >&2
       sleep 2
     done
-    echo "ERROR: services may still be paused: ${paused[*]} (run: docker compose unpause ${paused[*]})" >&2
+    echo "ERROR: containers may still be paused: ${paused[*]} (run: docker unpause ${paused[*]})" >&2
     paused=()
   fi
 }
@@ -82,24 +82,27 @@ trap 'exit 143' TERM
 
 # Services to pause during the archive: derived from the
 # homeserv.backup.pause=true container label (docs/APP_MANIFEST.md), with a
-# static fallback when Docker or the labels are unavailable.
-pause_services=()
+# static fallback when Docker or the labels are unavailable. Containers are
+# paused by ID so apps/ overlay services (unknown to the base compose file)
+# work too.
+paused_ids=()
 if docker info >/dev/null 2>&1; then
-  while IFS= read -r svc; do
-    [[ -n $svc ]] && pause_services+=("$svc")
-  done < <(docker ps --filter label=com.docker.compose.project=ai-node \
-      --filter label=homeserv.backup.pause=true \
-      --format '{{index .Labels "com.docker.compose.service"}}' | sort -u)
+  while IFS= read -r cid; do
+    [[ -n $cid ]] && paused_ids+=("$cid")
+  done < <(docker ps -q --filter label=com.docker.compose.project=ai-node \
+      --filter label=homeserv.backup.pause=true)
 fi
-if ((${#pause_services[@]} == 0)); then
-  pause_services=(agent-gateway open-webui comfyui grafana uptime-kuma speedtest-tracker)
+if ((${#paused_ids[@]} == 0)); then
+  for service in agent-gateway open-webui comfyui grafana uptime-kuma speedtest-tracker; do
+    cid=$("${compose[@]}" ps -q "$service" 2>/dev/null || true)
+    [[ -n $cid ]] && paused_ids+=("$cid")
+  done
 fi
 
-for service in "${pause_services[@]}"; do
-  container=$("${compose[@]}" ps -q "$service")
-  if [[ -n $container ]] && [[ $(docker inspect -f '{{.State.Running}}' "$container") == true ]]; then
-    "${compose[@]}" pause "$service" >/dev/null
-    paused+=("$service")
+for cid in "${paused_ids[@]}"; do
+  if [[ $(docker inspect -f '{{.State.Running}}' "$cid") == true ]] \
+    && docker pause "$cid" >/dev/null; then
+    paused+=("$cid")
   fi
 done
 

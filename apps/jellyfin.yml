@@ -1,0 +1,61 @@
+# Jellyfin — optional app overlay. See docs/APPS.md.
+# NOT part of the base stack; combine it explicitly:
+#   docker compose --env-file .env -f compose/ai-node.yml -f apps/jellyfin.yml up -d
+#
+# The x-common anchor in compose/ai-node.yml cannot be referenced across
+# files, so the hardening settings are replicated explicitly below.
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.11
+    container_name: app-jellyfin
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    # App manifest labels — see docs/APP_MANIFEST.md. Probes, dashboard tile,
+    # health checks, and backup pauses derive from these automatically.
+    labels:
+      homeserv.name: "Jellyfin"
+      homeserv.purpose: "Media streaming"
+      homeserv.subdomain: "jellyfin"
+      homeserv.legacy.port: "8096"
+      homeserv.probe.url: "http://jellyfin:8096/health"
+      homeserv.backup.pause: "true"
+    volumes:
+      - /srv/ai-node/data/jellyfin:/config
+      # Media library, read-only. MEDIA_ROOT comes from .env (default /srv/media).
+      - ${MEDIA_ROOT:-/srv/media}:/media:ro
+    # Legacy direct access; the Caddy proxy is the front door.
+    ports:
+      - "${LAN_IP}:8096:8096"
+      - "${TAILSCALE_IP}:8096:8096"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    mem_limit: 4g
+    networks: [monitoring, scrape]
+    # Optional: NVIDIA hardware transcoding. Requires nvidia-container-toolkit
+    # (installed by scripts/install.sh when a GPU is detected). Intel QSV
+    # (/dev/dri) does not apply to this host.
+    # gpus: all
+
+# The base file names its networks explicitly, so the overlay must reference
+# those names and mark them external: they are created by the base stack,
+# never by this overlay. Start the base stack first.
+networks:
+  monitoring:
+    name: ai-node-monitoring
+    external: true
+  scrape:
+    name: ai-node-scrape
+    external: true
