@@ -68,4 +68,40 @@ ensure_secret "$secrets_dir/speedtest.env" <<EOF
 APP_KEY=base64:$(rand_b64 32)
 EOF
 
+# LLDAP admin credentials. LLDAP_LDAP_USER_PASS is both the password for the
+# "admin" login of the LLDAP UI (https://lldap.BASE_DOMAIN) and the password
+# Authelia uses to bind to LDAP (see the bind secret further down).
+ensure_secret "$secrets_dir/lldap.env" <<EOF
+LLDAP_JWT_SECRET=$(rand_hex 32)
+LLDAP_LDAP_USER_PASS=$(rand_b64 24)
+EOF
+
+# Authelia session cookie secret (Docker secret file). compose/ai-node.yml
+# mounts it at /run/secrets/authelia_session_secret and points
+# AUTHELIA_SESSION_SECRET_FILE at it.
+ensure_secret "$secrets_dir/authelia-session.secret" <<EOF
+$(rand_hex 64)
+EOF
+
+# Authelia storage encryption key (Docker secret file;
+# AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE). Never change it after first start:
+# it encrypts data in the Authelia database.
+ensure_secret "$secrets_dir/authelia-storage.secret" <<EOF
+$(rand_hex 64)
+EOF
+
+# LDAP bind password for Authelia (Docker secret file;
+# AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE). Must equal
+# LLDAP_LDAP_USER_PASS in secrets/lldap.env, so read the value back from that
+# file instead of rolling a new one — this keeps the two in sync even when
+# lldap.env predates this run of the script.
+lldap_user_pass=$(sed -n 's/^LLDAP_LDAP_USER_PASS=//p' "$secrets_dir/lldap.env" | head -n1)
+if [[ -z $lldap_user_pass ]]; then
+  echo "ERROR: secrets/lldap.env has no LLDAP_LDAP_USER_PASS; fix or delete it and re-run." >&2
+  exit 1
+fi
+ensure_secret "$secrets_dir/authelia-ldap-bind.secret" <<EOF
+$lldap_user_pass
+EOF
+
 echo "Done: $created file(s) created, existing files left untouched."

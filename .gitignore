@@ -3,6 +3,7 @@ secrets/*
 !secrets/.gitkeep
 !secrets/*.env.example
 !secrets/agent-gateway.key.example
+!secrets/*.secret.example
 data/
 logs/
 *.log

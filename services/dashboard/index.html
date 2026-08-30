@@ -81,10 +81,11 @@
   <div class="grid" id="grid"></div>
 
   <noscript>
-    <p>Enable JavaScript for status dots. Services: Open WebUI (webui), ComfyUI
-       (comfy), Grafana (grafana), Uptime Kuma (kuma), Prometheus (prom),
-       Agent Gateway (gateway), ntfy (ntfy) — all as subdomains of
-       homeserve.lan, or via the legacy ports in SERVICE_MAP.md.</p>
+    <p>Enable JavaScript for status dots. Services: Authelia SSO (auth),
+       Open WebUI (webui), ComfyUI (comfy), Grafana (grafana), Uptime Kuma
+       (kuma), Prometheus (prom), Agent Gateway (gateway), ntfy (ntfy) — all
+       as subdomains of homeserve.lan, or via the legacy ports in
+       SERVICE_MAP.md.</p>
   </noscript>
 
   <section class="docs">
@@ -114,6 +115,7 @@ const LEGACY_HOST = "192.168.1.68";
 const BASE_DOMAIN = "homeserve.lan";
 
 const SERVICES = [
+  { name: "Authelia SSO",   purpose: "Sign-on portal — the protected services below redirect here before letting you in", sub: "auth", port: null, probe: null },
   { name: "Open WebUI",     purpose: "Chat UI for local models",            sub: "webui",   port: 3000,  probe: "/health" },
   { name: "ComfyUI",        purpose: "Image generation workflows",          sub: "comfy",   port: 8188,  probe: "/system_stats" },
   { name: "Grafana",        purpose: "Metrics dashboards",                  sub: "grafana", port: 3001,  probe: "/api/health" },
@@ -133,11 +135,13 @@ for (const svc of SERVICES) {
   tile.className = "tile";
 
   const proxyUrl = svc.sub ? `https://${svc.sub}.${BASE_DOMAIN}` : null;
-  const legacyUrl = `http://${LEGACY_HOST}:${svc.port}`;
+  const legacyUrl = svc.port ? `http://${LEGACY_HOST}:${svc.port}` : null;
 
-  const links = proxyUrl
+  const links = proxyUrl && legacyUrl
     ? `<a href="${proxyUrl}">${svc.sub}.${BASE_DOMAIN}</a><a class="legacy" href="${legacyUrl}">:${svc.port}</a>`
-    : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
+    : proxyUrl
+      ? `<a href="${proxyUrl}">${svc.sub}.${BASE_DOMAIN}</a>`
+      : `<a class="legacy" href="${legacyUrl}">${LEGACY_HOST}:${svc.port}</a>`;
 
   tile.innerHTML =
     `<h2><span class="dot" title="status unknown"></span>${svc.name}</h2>` +
@@ -145,6 +149,11 @@ for (const svc of SERVICES) {
     `<div class="links">${links}</div>`;
   grid.appendChild(tile);
 
+  // No legacy port for this service (SSO portal): nothing to probe.
+  if (!svc.probe) {
+    tile.querySelector(".dot").style.display = "none";
+    continue;
+  }
   // Rough liveness probe against the legacy HTTP port. no-cors means we only
   // learn "something answered", not the status code — good enough for a dot.
   // From an HTTPS page the browser blocks these probes as mixed content; the

@@ -5,15 +5,28 @@
 # its own local CA and issues certificates for these names (tls internal).
 # Plain HTTP on port 80 redirects to HTTPS automatically.
 #
+# Single sign-on: most sites import the (sso) snippet below, which delegates
+# authentication to Authelia (forward_auth). Unauthenticated browsers are
+# redirected to https://auth.BASE_DOMAIN; after login, Authelia's session
+# cookie (scoped to the whole BASE_DOMAIN) lets them through to every
+# protected site. Users are managed in LLDAP at https://lldap.BASE_DOMAIN.
+# Exemptions, deliberately:
+#   - gateway: machine-to-machine API with its own bearer-key auth;
+#     forward_auth would break tool callers.
+#   - ntfy: the ntfy phone app cannot complete an Authelia login (and
+#     Alertmanager posts internally anyway). Left unprotected; ntfy has its
+#     own auth (NTFY_AUTH_*) if you want to enable it.
+#
 # Making the names resolve (pick one):
 #   - Router/dnsmasq: add address=/homeserve.lan/192.168.1.68 (covers all
 #     subdomains with one wildcard entry).
 #   - Pi-hole: Local DNS record for homeserve.lan plus each subdomain, or a
 #     dnsmasq.d wildcard as above.
 #   - Per device: /etc/hosts entries, one line per subdomain:
-#       192.168.1.68 homeserve.lan webui.homeserve.lan comfy.homeserve.lan \
-#         grafana.homeserve.lan kuma.homeserve.lan prom.homeserve.lan \
-#         gateway.homeserve.lan ntfy.homeserve.lan
+#       192.168.1.68 homeserve.lan auth.homeserve.lan lldap.homeserve.lan \
+#         webui.homeserve.lan comfy.homeserve.lan grafana.homeserve.lan \
+#         kuma.homeserve.lan prom.homeserve.lan gateway.homeserve.lan \
+#         ntfy.homeserve.lan
 #
 # Trusting the internal CA on client devices (needed to avoid browser
 # warnings; TLS is still encrypted without it):
@@ -28,49 +41,89 @@
 #        Android/iOS: install as a CA certificate in security settings
 #
 # Direct per-service ports (e.g. 192.168.1.68:3000) remain published as legacy
-# access; this proxy is the intended entry point.
+# access; this proxy is the intended entry point. NOTE: the legacy ports
+# bypass SSO — consider unpublishing a port if that matters for a service.
 
 # No global options block: defaults are what we want. The admin API stays on
 # localhost:2019 inside the container and is used by the compose healthcheck;
 # automatic HTTPS sets up the port-80 redirect for every site below.
 
+# SSO gate: ask Authelia whether the request carries a valid session; it
+# answers 2xx (proxied through, with the identity headers copied below into
+# the upstream request) or redirects the browser to the portal to log in.
+(sso) {
+	forward_auth authelia:9091 {
+		uri /api/authz/forward-auth?authelia_url=https://auth.{$BASE_DOMAIN:homeserve.lan}/
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+	}
+}
+
+# Authelia SSO portal. Reachable without a session (it IS the login page).
+auth.{$BASE_DOMAIN:homeserve.lan} {
+	tls internal
+	reverse_proxy authelia:9091
+}
+
+# LLDAP user-management UI. It sits behind SSO like the other UIs; this is
+# not circular (Authelia authenticates against LLDAP's LDAP port directly,
+# not through this site). To restrict it to LLDAP's admin group, see the
+# commented ACL rule in config/authelia/configuration.yml.
+lldap.{$BASE_DOMAIN:homeserve.lan} {
+	tls internal
+	import sso
+	reverse_proxy lldap:17170
+}
+
 # Landing dashboard (static files from services/dashboard, mounted at /srv).
 {$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	root * /srv
 	file_server
 }
 
 webui.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	reverse_proxy open-webui:8080
 }
 
 comfy.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	reverse_proxy comfyui:8188
 }
 
+# Grafana still requires its own login on top of SSO (AuthProxy header auth
+# is available upstream but intentionally left off; GF_SECURITY admin
+# credentials from secrets/grafana.env remain the way in).
 grafana.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	reverse_proxy grafana:3000
 }
 
 kuma.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	reverse_proxy uptime-kuma:3001
 }
 
 prom.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
+	import sso
 	reverse_proxy prometheus:9090
 }
 
+# Machine-to-machine API with its own bearer-key auth: NOT behind SSO (see
+# header comment).
 gateway.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
 	reverse_proxy agent-gateway:8090
 }
 
+# Push endpoint for Alertmanager and the ntfy mobile app: NOT behind SSO (see
+# header comment).
 ntfy.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
 	reverse_proxy ntfy:80

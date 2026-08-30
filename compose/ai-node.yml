@@ -363,6 +363,64 @@ services:
     mem_limit: 1g
     networks: [monitoring, scrape]
 
+  # --- Single sign-on -------------------------------------------------------
+  # LLDAP is the user backend, Authelia the login portal. Neither publishes a
+  # port: browsers reach them only through Caddy (auth./lldap. subdomains),
+  # and Caddy's forward_auth checks every protected UI against Authelia.
+
+  lldap:
+    <<: *common
+    image: lldap/lldap:v0.6.3-alpine
+    container_name: auth-lldap
+    env_file:
+      - ../secrets/lldap.env
+    environment:
+      # Literal DN matching BASE_DOMAIN; keep in sync with base_dn in
+      # config/authelia/configuration.yml if BASE_DOMAIN ever changes.
+      LLDAP_LDAP_BASE_DN: dc=homeserve,dc=lan
+      # Base URL used in password-reset links.
+      LLDAP_HTTP_URL: https://lldap.${BASE_DOMAIN:-homeserve.lan}
+    volumes:
+      - /srv/ai-node/data/lldap:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:17170/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    networks: [monitoring, scrape]
+
+  authelia:
+    <<: *common
+    image: authelia/authelia:4.39.20
+    container_name: auth-authelia
+    depends_on:
+      lldap:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
+      # Secret values come from the Docker secrets below; the keys themselves
+      # stay out of config/authelia/configuration.yml.
+      AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage_secret
+      AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE: /run/secrets/authelia_ldap_bind_password
+    secrets:
+      - authelia_session_secret
+      - authelia_storage_secret
+      - authelia_ldap_bind_password
+    volumes:
+      - ../config/authelia/configuration.yml:/config/configuration.yml:ro
+      - /srv/ai-node/data/authelia:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9091/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    mem_limit: 256m
+    networks: [monitoring, scrape]
+
   caddy:
     <<: *common
     image: caddy:2.10.2-alpine
@@ -419,3 +477,13 @@ networks:
 secrets:
   agent_gateway_key:
     file: ../secrets/agent-gateway.key
+  # Authelia session cookie secret (AUTHELIA_SESSION_SECRET_FILE).
+  authelia_session_secret:
+    file: ../secrets/authelia-session.secret
+  # Authelia storage encryption key (AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE).
+  authelia_storage_secret:
+    file: ../secrets/authelia-storage.secret
+  # LDAP bind password for Authelia; must equal LLDAP_LDAP_USER_PASS in
+  # secrets/lldap.env (bootstrap-secrets.sh keeps them in sync).
+  authelia_ldap_bind_password:
+    file: ../secrets/authelia-ldap-bind.secret
