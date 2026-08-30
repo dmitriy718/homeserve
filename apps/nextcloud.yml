@@ -1,0 +1,65 @@
+# Nextcloud — optional app overlay. See docs/APPS.md.
+# NOT part of the base stack; combine it explicitly:
+#   docker compose --env-file .env -f compose/ai-node.yml -f apps/nextcloud.yml up -d
+#
+# The x-common anchor in compose/ai-node.yml cannot be referenced across
+# files, so the hardening settings are replicated explicitly below.
+services:
+  nextcloud:
+    image: nextcloud:33-apache
+    container_name: app-nextcloud
+    restart: unless-stopped
+    init: true
+    pids_limit: 1024
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      homeserv.name: "Nextcloud"
+      homeserv.purpose: "Files, calendar, contacts"
+      homeserv.subdomain: "cloud"
+      homeserv.legacy.port: "8480"
+      homeserv.probe.url: "http://nextcloud:80/status.php"
+      homeserv.backup.pause: "true"
+    environment:
+      # SQLite is the default (no DB service). For anything beyond a few
+      # users, plan a move to Postgres — left as future work.
+      NEXTCLOUD_TRUSTED_DOMAINS: cloud.${BASE_DOMAIN:-homeserve.lan} ${LAN_IP}:8480 ${TAILSCALE_IP}:8480
+      # The Caddy site terminates TLS, but setting OVERWRITEPROTOCOL=https
+      # would break legacy http access on :8480 (Nextcloud would redirect it
+      # to https). Leave unset unless you unpublish the legacy port.
+      # OVERWRITEPROTOCOL: https
+    volumes:
+      - /srv/ai-node/data/nextcloud:/var/www/html
+      # Optional: expose the media library inside Nextcloud (appears as a
+      # local external-storage candidate). Uncomment to enable.
+      # - ${MEDIA_ROOT:-/srv/media}:/media:ro
+    # Legacy direct access; the Caddy proxy is the front door.
+    ports:
+      - "${LAN_IP}:8480:80"
+      - "${TAILSCALE_IP}:8480:80"
+    healthcheck:
+      # The image ships no curl/wget; php is guaranteed, and allow_url_fopen
+      # is on in the official image.
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:80/status.php') === false ? 1 : 0);"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1g
+    networks: [monitoring, scrape]
+
+# monitoring/scrape are created by the base stack (explicit names in
+# compose/ai-node.yml), so they are referenced as external here.
+networks:
+  monitoring:
+    name: ai-node-monitoring
+    external: true
+  scrape:
+    name: ai-node-scrape
+    external: true
