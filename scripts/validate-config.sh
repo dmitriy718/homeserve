@@ -40,13 +40,17 @@ else
   fail "Python syntax"
 fi
 
-if jq -e . \
-  "$repo_root/monitoring/grafana/dashboards/ai-node-overview.json" \
-  "$repo_root/services/playwright/package.json" \
-  "$repo_root/services/playwright/package-lock.json" >/dev/null; then
-  ok "JSON configuration"
+if command -v jq >/dev/null; then
+  if jq -e . \
+    "$repo_root/monitoring/grafana/dashboards/ai-node-overview.json" \
+    "$repo_root/services/playwright/package.json" \
+    "$repo_root/services/playwright/package-lock.json" >/dev/null; then
+    ok "JSON configuration"
+  else
+    fail "JSON configuration"
+  fi
 else
-  fail "JSON configuration"
+  echo "SKIP JSON configuration (jq is not installed)"
 fi
 
 if command -v node >/dev/null; then

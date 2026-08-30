@@ -1,12 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-if [[ ! -d $runtime_dir || ! -w $runtime_dir ]]; then
-  runtime_dir=/tmp
+if ((EUID != 0)); then
+  exec sudo -- "$0" "$@"
 fi
-exec 9>"$runtime_dir/ai-node-update-$(id -u).lock"
+
+skip_backup=false
+force=false
+for arg in "$@"; do
+  case $arg in
+    --skip-backup) skip_backup=true ;;
+    --force) force=true ;;
+    *) echo "Usage: $0 [--skip-backup] [--force]" >&2; exit 2 ;;
+  esac
+done
+
+install -d -m 0755 /run/lock/ai-node
+exec 9>/run/lock/ai-node/update.lock
 flock -n 9 || { echo "Another stack update is running" >&2; exit 1; }
+
+# Snapshot configuration and state before touching the stack so that a
+# failed update can be recovered with both images and data.
+if ! $skip_backup; then
+  if ! /srv/ai-node/scripts/backup.sh; then
+    if $force; then
+      echo "WARNING: pre-update backup failed; continuing because --force was given" >&2
+    else
+      echo "ERROR: pre-update backup failed; aborting update (use --force to override or --skip-backup to skip)" >&2
+      exit 1
+    fi
+  fi
+fi
 
 cd /srv/ai-node/compose
 /srv/ai-node/scripts/validate-config.sh --strict
@@ -48,11 +72,11 @@ if ! /srv/ai-node/scripts/validate-config.sh --strict; then
   exit 1
 fi
 if ! "${compose[@]}" up -d --remove-orphans; then
-  rollback_running_stack || echo "ERROR: automatic rollback failed" >&2
+  rollback_running_stack || echo "ERROR: automatic rollback failed; images were restored but container DATA was not rolled back — restore it from the pre-update backup under /srv/backups/local if state is inconsistent" >&2
   exit 1
 fi
 if ! /srv/ai-node/scripts/wait-stack-healthy.sh; then
-  rollback_running_stack || echo "ERROR: automatic rollback failed" >&2
+  rollback_running_stack || echo "ERROR: automatic rollback failed; images were restored but container DATA was not rolled back — restore it from the pre-update backup under /srv/backups/local if state is inconsistent" >&2
   exit 1
 fi
 echo "Unused images/build cache were not deleted automatically. Review with: docker system df"

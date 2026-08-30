@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# shellcheck source=/dev/null
-source /srv/ai-node/.env
+services_only=false
+case ${1:-} in
+  "") ;;
+  --services-only) services_only=true ;;
+  *) echo "Usage: $0 [--services-only]" >&2; exit 2 ;;
+esac
+
+# Extract a VAR=value from .env without sourcing it (the file is config, not code).
+env_value() {
+  local line
+  line=$(grep -E "^$1=" /srv/ai-node/.env | tail -n1) || return 1
+  [[ $line =~ ^[A-Z_]+=[a-zA-Z0-9./:-]+$ ]] || return 1
+  printf '%s' "${line#*=}"
+}
+
+LAN_IP=$(env_value LAN_IP) || { echo "FAIL LAN_IP missing or invalid in /srv/ai-node/.env" >&2; exit 1; }
+DISK_WARN_PERCENT=$(env_value DISK_WARN_PERCENT) || DISK_WARN_PERCENT=90
 base="http://${LAN_IP}"
-disk_warn_percent=${DISK_WARN_PERCENT:-90}
+disk_warn_percent=$DISK_WARN_PERCENT
 
 failures=0
 check_url() {
@@ -41,20 +56,22 @@ check_url "Grafana" "${base}:3001/api/health"
 check_url "Uptime Kuma" "${base}:3002/"
 check_url "Speedtest Tracker" "${base}:8765/"
 
-root_used=$(df --output=pcent / | awk 'NR==2 {gsub(/%/, ""); print $1}')
-if [[ $root_used =~ ^[0-9]+$ ]] && ((root_used < disk_warn_percent)); then
-  echo "OK   Root filesystem usage: ${root_used}%"
-else
-  echo "FAIL Root filesystem usage: ${root_used:-unknown}% (threshold ${disk_warn_percent}%)"
-  failures=$((failures + 1))
-fi
+if ! $services_only; then
+  root_used=$(df --output=pcent / | awk 'NR==2 {gsub(/%/, ""); print $1}')
+  if [[ $root_used =~ ^[0-9]+$ ]] && ((root_used < disk_warn_percent)); then
+    echo "OK   Root filesystem usage: ${root_used}%"
+  else
+    echo "FAIL Root filesystem usage: ${root_used:-unknown}% (threshold ${disk_warn_percent}%)"
+    failures=$((failures + 1))
+  fi
 
-root_inode_used=$(df --output=ipcent / | awk 'NR==2 {gsub(/%/, ""); print $1}')
-if [[ $root_inode_used =~ ^[0-9]+$ ]] && ((root_inode_used < disk_warn_percent)); then
-  echo "OK   Root inode usage: ${root_inode_used}%"
-else
-  echo "FAIL Root inode usage: ${root_inode_used:-unknown}% (threshold ${disk_warn_percent}%)"
-  failures=$((failures + 1))
+  root_inode_used=$(df --output=ipcent / | awk 'NR==2 {gsub(/%/, ""); print $1}')
+  if [[ $root_inode_used =~ ^[0-9]+$ ]] && ((root_inode_used < disk_warn_percent)); then
+    echo "OK   Root inode usage: ${root_inode_used}%"
+  else
+    echo "FAIL Root inode usage: ${root_inode_used:-unknown}% (threshold ${disk_warn_percent}%)"
+    failures=$((failures + 1))
+  fi
 fi
 
 unhealthy=$(docker ps -q \
@@ -77,11 +94,13 @@ else
   failures=$((failures + 1))
 fi
 
-if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
-  echo "OK   Tailscale connected"
-else
-  echo "FAIL Tailscale disconnected"
-  failures=$((failures + 1))
+if ! $services_only; then
+  if tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
+    echo "OK   Tailscale connected"
+  else
+    echo "FAIL Tailscale disconnected"
+    failures=$((failures + 1))
+  fi
 fi
 
 echo "Health check failures: $failures"
