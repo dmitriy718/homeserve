@@ -336,11 +336,13 @@ async function probeOne(t) {
   const timer = setTimeout(() => controller.abort(), 6000);
   const start = performance.now();
   try {
-    const res = await fetch(`/healthz/${t.svc.probe}`, { cache: "no-store", signal: controller.signal });
+    const res = await fetch(`/healthz/${t.svc.probe}`, { cache: "no-store", signal: controller.signal, redirect: "manual" });
     const ms = Math.round(performance.now() - start);
     // Any answered response below 400 means the service is alive — several
-    // apps answer their root with a 302 to a login/dashboard page. A 4xx means
-    // the probe key fell through to Caddy's file_server (no route), i.e. down.
+    // apps answer their root with a 302 to a login/dashboard page. manual
+    // redirect keeps that 302 (following it would land on the landing site's
+    // own file_server and 404). A 4xx means the probe key fell through to
+    // Caddy's file_server (no route), i.e. down.
     if (res.status >= 200 && res.status < 400) {
       setState(t, "up", `Operational · ${ms} ms`);
       return true;
