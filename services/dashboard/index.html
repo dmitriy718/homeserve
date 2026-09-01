@@ -243,6 +243,7 @@ const GROUPS = [
     { name: "Jellyfin",     purpose: "Movies, shows and music",          sub: "jellyfin", probe: "jellyfin",  icon: "play",   hue: "#a78bfa" },
     { name: "Immich",       purpose: "Photo and video library",          sub: "immich",   probe: "immich",    icon: "photos", hue: "#f472b6" },
     { name: "Nextcloud",    purpose: "Files, sync and sharing",          sub: "cloud",    probe: "cloud",     icon: "cloud",  hue: "#38bdf8" },
+    // LAN_IP from /srv/ai-node/.env — update if the host IP changes.
     { name: "Speedtest",    purpose: "Daily Internet speed history",     url: "http://192.168.1.68:8765", probe: "speedtest", icon: "gauge", hue: "#fbbf24" }
   ]},
   { title: "AI & Compute", services: [
@@ -337,9 +338,10 @@ async function probeOne(t) {
   try {
     const res = await fetch(`/healthz/${t.svc.probe}`, { cache: "no-store", signal: controller.signal });
     const ms = Math.round(performance.now() - start);
-    // Any answered response below 500 means the service is alive — several
-    // apps answer their root with a 302 to a login/dashboard page.
-    if (res.status < 500) {
+    // Any answered response below 400 means the service is alive — several
+    // apps answer their root with a 302 to a login/dashboard page. A 4xx means
+    // the probe key fell through to Caddy's file_server (no route), i.e. down.
+    if (res.status >= 200 && res.status < 400) {
       setState(t, "up", `Operational · ${ms} ms`);
       return true;
     }
@@ -359,25 +361,32 @@ function setState(t, state, text) {
   t.statusText.textContent = text;
 }
 
+let refreshing = false; // guards against overlapping interval/visibilitychange refreshes
 async function refresh() {
-  overallEl.className = "pill";
-  overallText.textContent = "Checking services…";
-  overallEl.querySelector(".dot").className = "dot checking";
-  for (const t of tiles) setState(t, "checking", "Checking…");
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    overallEl.className = "pill";
+    overallText.textContent = "Checking services…";
+    overallEl.querySelector(".dot").className = "dot checking";
+    for (const t of tiles) setState(t, "checking", "Checking…");
 
-  const results = await Promise.all(tiles.map(probeOne));
-  const upCount = results.filter(Boolean).length;
-  const dotEl = overallEl.querySelector(".dot");
-  if (upCount === tiles.length) {
-    overallEl.className = "pill ok";
-    dotEl.className = "dot";
-    overallText.textContent = "All systems operational";
-  } else {
-    overallEl.className = "pill bad";
-    dotEl.className = "dot";
-    overallText.textContent = `${upCount} of ${tiles.length} services up`;
+    const results = await Promise.all(tiles.map(probeOne));
+    const upCount = results.filter(Boolean).length;
+    const dotEl = overallEl.querySelector(".dot");
+    if (upCount === tiles.length) {
+      overallEl.className = "pill ok";
+      dotEl.className = "dot";
+      overallText.textContent = "All systems operational";
+    } else {
+      overallEl.className = "pill bad";
+      dotEl.className = "dot";
+      overallText.textContent = `${upCount} of ${tiles.length} services up`;
+    }
+    refreshedEl.textContent = `Updated ${new Date().toLocaleTimeString()} · refreshes every 30 s`;
+  } finally {
+    refreshing = false;
   }
-  refreshedEl.textContent = `Updated ${new Date().toLocaleTimeString()} · refreshes every 30 s`;
 }
 
 build();

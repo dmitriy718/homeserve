@@ -44,6 +44,9 @@ MAX_COMMAND_CHARS = 20_000
 MAX_WRITE_CHARS = 5_000_000
 MAX_AUDIT_BYTES = 10 * 1024 * 1024
 AUDIT_LOCK = threading.Lock()
+# Bounds concurrent shell_exec runs so long-lived commands cannot exhaust the
+# threadpool; saturated callers get a 429 instead of queueing behind 3600s shells.
+SHELL_SLOTS = threading.BoundedSemaphore(8)
 
 def audit(action: str, detail: dict | None = None):
     record = {"ts": time.time(), "action": action, "detail": detail or {}}
@@ -85,7 +88,7 @@ class ShellReq(BaseModel):
     timeout_seconds: int = Field(120, ge=1, le=3600)
 
 @app.get("/health", operation_id="agent_health")
-def health(): return {"status":"ok", "workspace_root":str(ROOT), "artifact_root":str(ARTIFACTS)}
+async def health(): return {"status":"ok"}
 
 @app.get("/openapi.json", include_in_schema=False)
 def openapi_schema(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
@@ -140,7 +143,9 @@ async def transparency_events(x_agent_key: Optional[str] = Header(None), authori
     async def stream():
         last=""
         for _ in range(120):
-            snap=json.dumps(service_snapshot(),separators=(",",":"))
+            # service_snapshot() does blocking urlopen calls (up to ~24s total);
+            # keep them off the event loop.
+            snap=json.dumps(await asyncio.to_thread(service_snapshot),separators=(",",":"))
             if snap != last: yield f"event: services\ndata: {snap}\n\n"; last=snap
             await asyncio.sleep(2)
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
@@ -156,7 +161,8 @@ def fs_list(path: str = "", x_agent_key: Optional[str] = Header(None), authoriza
     if not p.is_dir(): raise HTTPException(400,"not a directory")
     entries=[]
     for x in sorted(p.iterdir()):
-        info=x.lstat()
+        try: info=x.lstat()
+        except OSError: continue  # entry vanished between iterdir and lstat
         kind="symlink" if stat.S_ISLNK(info.st_mode) else "dir" if stat.S_ISDIR(info.st_mode) else "file"
         entries.append({"name":x.name,"type":kind,"size":info.st_size if kind == "file" else None})
     return {"path":path,"entries":entries}
@@ -169,7 +175,8 @@ def fs_read(path: str, x_agent_key: Optional[str] = Header(None), authorization:
     try:
         with os.fdopen(open_nofollow(p, os.O_RDONLY), "r") as source: content = source.read()
     except UnicodeDecodeError: raise HTTPException(415,"binary file; use artifact handling")
-    except OSError: raise HTTPException(404,"file not found")
+    except FileNotFoundError: raise HTTPException(404,"file not found")
+    except PermissionError: raise HTTPException(403,"permission denied")
     return {"path":path,"content":content,"size":p.stat().st_size}
 
 @app.post("/fs/write", operation_id="fs_write")
@@ -180,9 +187,11 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
     try:
         existing = ""
         if req.append and p.exists():
+            if p.stat().st_size > 5_000_000: raise HTTPException(413, "file too large")
             with os.fdopen(open_nofollow(p, os.O_RDONLY), "r") as source: existing = source.read()
     except UnicodeDecodeError: raise HTTPException(415, "cannot append text to a binary file")
-    except OSError: raise HTTPException(404, "file not found")
+    except FileNotFoundError: raise HTTPException(404, "file not found")
+    except PermissionError: raise HTTPException(403, "permission denied")
     content = existing + req.content
     encoded = content.encode()
     if len(req.content) > MAX_WRITE_CHARS or len(encoded) > MAX_WRITE_CHARS:
@@ -239,29 +248,42 @@ def fs_hash(path: str, x_agent_key: Optional[str] = Header(None), authorization:
 def shell_exec(req: ShellReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     auth(x_agent_key, authorization)
     if len(req.command) > MAX_COMMAND_CHARS: raise HTTPException(413, "command exceeds 20,000 characters")
-    audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
-    started=time.time()
-    shell_env = {
-        "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
-        "HOME": "/srv/agent-cache",
-        "TMPDIR": "/tmp",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "AGENT_PROJECT": req.project,
-    }
-    process=subprocess.Popen(["bash","-lc",req.command],cwd=wd,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=shell_env,start_new_session=True)
+    if not SHELL_SLOTS.acquire(blocking=False): raise HTTPException(429, "too many concurrent shell executions")
     try:
-        stdout,stderr=process.communicate(timeout=req.timeout_seconds)
-        return {"project":req.project,"command":req.command,"exit_code":process.returncode,"stdout":stdout[-20000:],"stderr":stderr[-20000:],"duration_seconds":round(time.time()-started,3)}
-    except subprocess.TimeoutExpired:
-        try: os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError: pass
-        try: stdout,stderr=process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            try: os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError: pass
-            stdout,stderr=process.communicate()
-        return {"project":req.project,"command":req.command,"exit_code":124,"stdout":stdout[-20000:],"stderr":stderr[-20000:],"timed_out":True,"duration_seconds":round(time.time()-started,3)}
+        audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
+        started=time.time()
+        shell_env = {
+            "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "HOME": "/srv/agent-cache",
+            "TMPDIR": "/tmp",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "AGENT_PROJECT": req.project,
+        }
+        # Stream stdout/stderr into temp files and keep only the trailing 20KB,
+        # so a runaway command cannot fill memory before the response truncates.
+        with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
+            process=subprocess.Popen(["bash","-lc",req.command],cwd=wd,stdout=out_file,stderr=err_file,env=shell_env,start_new_session=True)
+            timed_out=False
+            try: process.wait(timeout=req.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out=True
+                try: os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError: pass
+                try: process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try: os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError: pass
+                    process.wait()
+            result={"project":req.project,"command":req.command,"exit_code":124 if timed_out else process.returncode,"stdout":_tail(out_file),"stderr":_tail(err_file),"duration_seconds":round(time.time()-started,3)}
+            if timed_out: result["timed_out"]=True
+            return result
+    finally: SHELL_SLOTS.release()
+
+def _tail(f, limit=20000):
+    f.seek(0, os.SEEK_END)
+    f.seek(max(0, f.tell() - limit))
+    return f.read().decode("utf-8", errors="replace")
 
 class URLReq(BaseModel):
     url: str = Field(..., min_length=1, max_length=2048)
