@@ -79,6 +79,73 @@ lldap.{$BASE_DOMAIN:homeserve.lan} {
 {$BASE_DOMAIN:homeserve.lan} {
 	tls internal
 	import sso
+
+	# Same-origin liveness probes for the dashboard's status dots. Each
+	# /healthz/<key> maps to one health endpoint on the internal network,
+	# so the page can probe every service over HTTPS from its own origin —
+	# no extra DNS names, no mixed-content HTTP fetches (which browsers
+	# block, and which is why the dots used to stay gray).
+	handle /healthz/auth {
+		rewrite * /api/health
+		reverse_proxy authelia:9091
+	}
+	handle /healthz/lldap {
+		rewrite * /
+		reverse_proxy lldap:17170
+	}
+	handle /healthz/webui {
+		rewrite * /health
+		reverse_proxy open-webui:8080
+	}
+	handle /healthz/comfy {
+		rewrite * /system_stats
+		reverse_proxy comfyui:8188
+	}
+	handle /healthz/grafana {
+		rewrite * /api/health
+		reverse_proxy grafana:3000
+	}
+	handle /healthz/kuma {
+		rewrite * /
+		reverse_proxy uptime-kuma:3001
+	}
+	handle /healthz/prom {
+		rewrite * /-/ready
+		reverse_proxy prometheus:9090
+	}
+	handle /healthz/ntfy {
+		rewrite * /v1/health
+		reverse_proxy ntfy:80
+	}
+	handle /healthz/gateway {
+		rewrite * /health
+		reverse_proxy agent-gateway:8090
+	}
+	handle /healthz/ollama {
+		rewrite * /api/tags
+		reverse_proxy ollama:11434
+	}
+	handle /healthz/embeddings {
+		rewrite * /health
+		reverse_proxy embeddings:8080
+	}
+	handle /healthz/speedtest {
+		rewrite * /
+		reverse_proxy speedtest-tracker:80
+	}
+	handle /healthz/jellyfin {
+		rewrite * /health
+		reverse_proxy jellyfin:8096
+	}
+	handle /healthz/immich {
+		rewrite * /api/server/ping
+		reverse_proxy immich-server:2283
+	}
+	handle /healthz/cloud {
+		rewrite * /status.php
+		reverse_proxy nextcloud:80
+	}
+
 	root * /srv
 	file_server
 }
