@@ -59,8 +59,12 @@ else
   echo "SKIP Playwright JavaScript syntax (node is not installed)"
 fi
 
-compose=(docker compose --env-file "$repo_root/.env" -f "$repo_root/compose/ai-node.yml")
-compose_dev=(docker compose --profile dev --env-file "$repo_root/.env" -f "$repo_root/compose/ai-node.yml")
+# .env only exists on the server; fall back to .env.example so local
+# validation works on a workstation clone.
+env_file=$repo_root/.env
+[[ -f $env_file ]] || env_file=$repo_root/.env.example
+compose=(docker compose --env-file "$env_file" -f "$repo_root/compose/ai-node.yml")
+compose_dev=(docker compose --profile dev --env-file "$env_file" -f "$repo_root/compose/ai-node.yml")
 if $strict; then
   for required in agent-gateway.env grafana.env speedtest.env; do
     [[ -s "$repo_root/secrets/$required" ]] || fail "required secret file missing or empty: secrets/$required"

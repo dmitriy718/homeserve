@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+[[ -d /srv/ai-node ]] || echo "warning: not the ai-node host; showing THIS machine's status" >&2
+
 echo "AI node status - $(date --iso-8601=seconds)"
 echo "Hostname: $(hostname)"
 echo "Uptime/load: $(uptime -p); $(cut -d' ' -f1-3 /proc/loadavg)"

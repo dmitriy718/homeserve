@@ -11,13 +11,16 @@ RemainAfterExit=yes
 WorkingDirectory=/srv/ai-node
 ExecStartPre=/srv/ai-node/scripts/validate-config.sh --strict
 ExecStartPre=/srv/ai-node/scripts/wait-network-addresses.sh
-ExecStart=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml up -d --remove-orphans
+# Build the -f file set from container labels (base + active apps/ overlays,
+# falling back to base-only) so --remove-orphans does not prune stopped apps/
+# overlay containers on boot. Same source of truth as update-stack.sh.
+ExecStart=/bin/bash -c 'args=(); while IFS= read -r f; do args+=(-f "$$f"); done < <(/srv/ai-node/scripts/compose-files.sh); (("$${#args[@]}")) || exit 1; exec /usr/bin/docker compose --env-file /srv/ai-node/.env "$${args[@]}" up -d --remove-orphans'
 ExecStartPost=/srv/ai-node/scripts/wait-stack-healthy.sh
-# Regenerate label-derived probe targets and dashboard tiles on every stack
-# start. Label changes take effect on stack restart or a manual run of the
+# Regenerate label-derived Prometheus probe targets on every stack start.
+# Label changes take effect on stack restart or a manual run of the
 # script; see docs/APP_MANIFEST.md.
 ExecStartPost=/srv/ai-node/scripts/discover-services.sh
-ExecReload=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml up -d --remove-orphans
+ExecReload=/bin/bash -c 'args=(); while IFS= read -r f; do args+=(-f "$$f"); done < <(/srv/ai-node/scripts/compose-files.sh); (("$${#args[@]}")) || exit 1; exec /usr/bin/docker compose --env-file /srv/ai-node/.env "$${args[@]}" up -d --remove-orphans'
 ExecStop=/usr/bin/docker compose --env-file /srv/ai-node/.env -f /srv/ai-node/compose/ai-node.yml stop --timeout 45
 TimeoutStartSec=600
 TimeoutStopSec=120

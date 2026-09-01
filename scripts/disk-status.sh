@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+[[ -d /srv/ai-node ]] || echo "warning: not the ai-node host; showing THIS machine's status" >&2
 df -hT
 echo
 sudo lvs -o lv_name,vg_name,lv_size,data_percent 2>/dev/null || true

@@ -164,17 +164,30 @@ for timer in "$install_dir"/host/etc/systemd/system/*.timer; do
   systemctl enable --now "$(basename "$timer")"
 done
 
+# Uptime Kuma's auth toggle lives in its SQLite database, not in env/config:
+# apply the "no login by default" policy now that the stack is up. The stack
+# unit waits for healthy containers before returning, so kuma.db should
+# exist; if an unusually slow first start raced us, leave a re-run note
+# instead of failing the install (the script exits non-zero when the DB is
+# missing and is safe to run any time).
+if ! "$install_dir/scripts/disable-app-auth.sh"; then
+  echo "NOTE: Uptime Kuma auth not disabled yet; once the stack is up, run:" >&2
+  echo "      sudo $install_dir/scripts/disable-app-auth.sh" >&2
+fi
+
 cat <<EOF
 
 Installation complete.
 
 Next steps:
   - Watch startup:      systemctl status ai-node-stack
-  - Open WebUI (chat):  http://$lan_ip:3000 (first account becomes admin;
-                        see the ENABLE_SIGNUP comment in compose/ai-node.yml)
-  - Front door (proxy): https://webui.homeserve.lan once DNS and CA trust are
-                        set up per config/caddy/Caddyfile
-  - Grafana:            http://$lan_ip:3001 (admin password in $install_dir/secrets/grafana.env)
+  - Landing dashboard:  https://homeserve.lan
+  - Open WebUI (chat):  https://webui.homeserve.lan
+  - Grafana:            https://grafana.homeserve.lan
+                        (Open WebUI and Grafana publish no ports — proxy only;
+                        set up DNS and CA trust per config/caddy/Caddyfile
+                        first. Port 80 is a preserved system httpd; there is
+                        no http->https redirect, so use https:// directly.)
   - Alert phone app:    subscribe to ntfy topics at http://$lan_ip:2586
                         (topics: homeserve-alerts, homeserve-alerts-critical)
   - Service URLs:       $install_dir/SERVICE_MAP.md

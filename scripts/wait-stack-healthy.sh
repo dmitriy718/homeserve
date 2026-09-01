@@ -19,5 +19,5 @@ for _ in $(seq 1 60); do
 done
 
 cat "$report" >&2
-echo "AI node stack did not become healthy within 300 seconds" >&2
+echo "AI node stack did not become healthy after 300 seconds of retries" >&2
 exit 1

@@ -8,7 +8,9 @@ set -euo pipefail
 #   --cleanup     Delete /srv/builds/agents/* job directories older than 14 days and exit.
 
 if [[ ${1:-} == --cleanup ]]; then
-  find /srv/builds/agents -mindepth 1 -maxdepth 1 -type d -mtime +14 -print -exec rm -rf -- {} +
+  if [[ -d /srv/builds/agents ]]; then
+    find /srv/builds/agents -mindepth 1 -maxdepth 1 -type d -mtime +14 -print -exec rm -rf -- {} +
+  fi
   exit 0
 fi
 
@@ -35,7 +37,7 @@ logs="$job_root/logs"
 [[ ! -e $job_root ]] || { echo "Job already exists: $job_root" >&2; exit 2; }
 mkdir -p "$workspace" "$artifacts" "$logs"
 
-docker run --rm \
+if ! timeout 300 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --cap-drop ALL \
   --security-opt no-new-privileges \
@@ -43,10 +45,26 @@ docker run --rm \
   --memory 1g \
   --cpus 2 \
   -v "$workspace:/workspace" \
-  alpine/git:2.49.1 clone --depth 1 "$repo" /workspace
+  alpine/git:2.49.1 clone --depth 1 "$repo" /workspace; then
+  # Remove the fresh job root so a retry with the same JOB_ID does not hit
+  # "Job already exists".
+  rm -rf -- "$job_root"
+  echo "git clone failed; removed $job_root so the job can be retried" >&2
+  exit 1
+fi
+
+# Deterministic container name so the EXIT trap can force-remove the job
+# container even when `timeout` SIGKILLs the docker CLI (which would
+# otherwise leave the container running).
+container_name="agent-job-$job_id"
+cleanup_job_container() {
+  docker rm -f "$container_name" >/dev/null 2>&1 || true
+}
+trap cleanup_job_container EXIT
 
 timeout --kill-after=30s "${job_timeout}s" \
   docker run --rm \
+  --name "$container_name" \
   --user "1000:1000" \
   --read-only \
   --cap-drop ALL \
