@@ -104,4 +104,12 @@ ensure_secret "$secrets_dir/authelia-ldap-bind.secret" <<EOF
 $lldap_user_pass
 EOF
 
+# Authelia password-reset JWT secret (Docker secret file;
+# AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE). Authelia 4.39
+# refuses to start without it even though self-service reset goes through the
+# filesystem notifier here.
+ensure_secret "$secrets_dir/authelia-jwt.secret" <<EOF
+$(rand_hex 32)
+EOF
+
 echo "Done: $created file(s) created, existing files left untouched."
