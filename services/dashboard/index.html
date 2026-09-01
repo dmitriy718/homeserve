@@ -337,7 +337,9 @@ async function probeOne(t) {
   try {
     const res = await fetch(`/healthz/${t.svc.probe}`, { cache: "no-store", signal: controller.signal });
     const ms = Math.round(performance.now() - start);
-    if (res.ok) {
+    // Any answered response below 500 means the service is alive — several
+    // apps answer their root with a 302 to a login/dashboard page.
+    if (res.status < 500) {
       setState(t, "up", `Operational · ${ms} ms`);
       return true;
     }
