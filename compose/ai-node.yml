@@ -273,6 +273,7 @@ services:
     labels:
       homeserv.name: "Alertmanager"
       homeserv.purpose: "Alert routing and notification dispatch"
+      homeserv.backup.pause: "true"
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -297,6 +298,7 @@ services:
       homeserv.purpose: "Alert notifications to your phone"
       homeserv.subdomain: "ntfy"
       homeserv.legacy.port: "2586"
+      homeserv.backup.pause: "true"
       # No homeserv.probe.url: not attached to the scrape network, so the
       # blackbox exporter cannot reach it (probed via its legacy port instead).
     command: serve
@@ -384,6 +386,12 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro,rslave
       - /srv/ai-node/data/node-exporter-textfile:/textfile:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9100/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
     mem_limit: 128m
     networks: [scrape]
 
@@ -395,6 +403,12 @@ services:
     volumes:
       - ../monitoring/blackbox.yml:/config/blackbox.yml:ro
     command: ["--config.file=/config/blackbox.yml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9115/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
     mem_limit: 128m
     networks: [scrape]
 
@@ -496,6 +510,7 @@ services:
     labels:
       homeserv.name: "LLDAP"
       homeserv.purpose: "LDAP user backend for single sign-on"
+      homeserv.backup.pause: "true"
       # No homeserv.subdomain: the lldap. site exists in Caddy, but this is an
       # admin backend and deliberately gets no dashboard tile.
     env_file:
@@ -525,6 +540,7 @@ services:
       homeserv.name: "Authelia SSO"
       homeserv.purpose: "Sign-on portal — the protected services below redirect here before letting you in"
       homeserv.subdomain: "auth"
+      homeserv.backup.pause: "true"
       # No legacy port and no probe: reachable only through Caddy.
     depends_on:
       lldap:

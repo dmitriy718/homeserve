@@ -96,6 +96,10 @@ services:
     image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
     container_name: app-immich-postgres
     restart: unless-stopped
+    labels:
+      # Pause while the tar runs: copying the live PG data dir otherwise
+      # yields an inconsistent DB backup.
+      homeserv.backup.pause: "true"
     init: true
     pids_limit: 1024
     stop_grace_period: 45s
