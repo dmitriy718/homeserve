@@ -90,3 +90,14 @@ notifier:
 # forward_auth covers every browser-facing UI in this stack. Add an
 # `identity_providers: oidc:` block here only if a future service needs
 # native OIDC.
+
+identity_validation:
+  reset_password:
+    # Disabled: Authelia requires a jwt_secret (and, in practice, an SMTP
+    # notifier) for self-service resets. On this single-admin deployment the
+    # admin resets passwords directly in the LLDAP UI instead. To re-enable:
+    # remove `disable: true`, generate a jwt secret (e.g. add an
+    # authelia-jwt.secret Docker secret and set
+    # AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE), and switch
+    # the notifier above to smtp.
+    disable: true

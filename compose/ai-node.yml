@@ -550,9 +550,10 @@ services:
       - /srv/ai-node/data/caddy/data:/data
       - /srv/ai-node/data/caddy/config:/config
     ports:
-      - "${LAN_IP}:80:80"
+      # 443 only: a system httpd (preserved non-compose workload) owns *:80
+      # on this host, so the HTTP->HTTPS redirect is unavailable; use
+      # https://<sub>.{BASE_DOMAIN} directly.
       - "${LAN_IP}:443:443"
-      - "${TAILSCALE_IP}:80:80"
       - "${TAILSCALE_IP}:443:443"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:2019/config/ || exit 1"]
