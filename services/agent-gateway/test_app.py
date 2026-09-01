@@ -126,6 +126,24 @@ class GatewayTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(HTTPException):
                 app.checked_url(url)
 
+    def test_safe_rejects_traversal_and_absolute_escape(self):
+        for rel in ("..", "../outside", f"{self.project}/../../etc", "/etc/passwd"):
+            with self.subTest(rel=rel), self.assertRaises(HTTPException) as rejected:
+                app.safe(rel)
+            self.assertEqual(rejected.exception.status_code, 400)
+
+    def test_safe_rejects_symlink_escape(self):
+        link = Path(self.temp.name) / "escape"
+        try: link.symlink_to("/etc")
+        except OSError: self.skipTest("cannot create symlinks in this environment")
+        with self.assertRaises(HTTPException) as rejected:
+            app.safe(f"{self.project}/escape/passwd")
+        self.assertEqual(rejected.exception.status_code, 400)
+
+    def test_safe_accepts_in_root_path(self):
+        accepted = app.safe(f"{self.project}/note.txt")
+        self.assertEqual(accepted, (app.ROOT / self.project / "note.txt").resolve())
+
 
 if __name__ == "__main__":
     unittest.main()

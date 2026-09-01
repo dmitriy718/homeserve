@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_TTL_SECONDS = int(os.getenv("GPU_LEASE_DEFAULT_TTL", "120"))
 REAPER_INTERVAL_SECONDS = float(os.getenv("GPU_LEASE_REAPER_INTERVAL", "1"))
+MAX_QUEUE_DEPTH = 64
 
 app = FastAPI(
     title="GPU Scheduler",
@@ -108,7 +109,7 @@ def acquire(req: LeaseReq, wait: bool = Query(False), wait_timeout: float = Quer
     With ?wait=true the request long-polls (up to wait_timeout seconds) until
     the lease is granted to this holder, and returns 409 with timed_out=true if
     the deadline passes first. Re-acquiring a lease you already hold is an
-    idempotent refresh.
+    idempotent refresh. Returns 429 when the wait queue is full.
     """
     global LEASE
     with LOCK:
@@ -129,6 +130,8 @@ def acquire(req: LeaseReq, wait: bool = Query(False), wait_timeout: float = Quer
             QUEUE[:] = [q for q in QUEUE if q["holder"] != req.holder]
             return _granted_payload()
         if all(q["holder"] != req.holder for q in QUEUE):
+            if len(QUEUE) >= MAX_QUEUE_DEPTH:
+                raise HTTPException(429, detail="lease queue is full")
             QUEUE.append({"holder": req.holder, "kind": req.kind, "ttl_seconds": req.ttl_seconds, "enqueued_at": now})
         if not wait:
             raise HTTPException(409, detail=_conflict_payload(req.holder))
@@ -136,6 +139,12 @@ def acquire(req: LeaseReq, wait: bool = Query(False), wait_timeout: float = Quer
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
+                # Dequeue the timed-out waiter so _grant_next_locked cannot
+                # hand the lease to a caller that is no longer listening.
+                # Disconnects mid-wait cannot be detected from this sync
+                # (threadpool) endpoint; the bounded wait_timeout is the
+                # backstop that reclaims those slots.
+                QUEUE[:] = [q for q in QUEUE if q["holder"] != req.holder]
                 detail = _conflict_payload(req.holder)
                 detail["timed_out"] = True
                 raise HTTPException(409, detail=detail)
@@ -178,7 +187,7 @@ def heartbeat(holder: str):
 
 
 @app.get("/state")
-def state():
+async def state():
     """Current holder, queue with positions, and lifetime counters."""
     with LOCK:
         now = time.time()
@@ -209,7 +218,7 @@ def _escape(value: str) -> str:
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-def metrics():
+async def metrics():
     with LOCK:
         _expire_locked(time.time())
         lines = [

@@ -88,6 +88,19 @@ class LeaseTests(unittest.TestCase):
         response = self.acquire("impatient", "image", wait="true", wait_timeout=1)
         self.assertEqual(response.status_code, 409)
         self.assertTrue(response.json()["detail"]["timed_out"])
+        # The timed-out waiter was dequeued, so a later release grants nothing.
+        self.assertEqual(self.client.get("/state").json()["queue"], [])
+        self.client.delete("/leases/blocker")
+        self.assertIsNone(self.client.get("/state").json()["current"])
+
+    def test_queue_is_bounded_and_deduplicated(self):
+        self.acquire("blocker", "llm")
+        for i in range(64):
+            self.assertEqual(self.acquire(f"waiter-{i}").status_code, 409)
+        self.assertEqual(self.acquire("waiter-65").status_code, 429)
+        # A holder already queued keeps its slot instead of appending again.
+        self.assertEqual(self.acquire("waiter-0").status_code, 409)
+        self.assertEqual(len(self.client.get("/state").json()["queue"]), 64)
 
     def test_ttl_expiry_reclaims_lease_and_serves_queue(self):
         self.acquire("crashy", "llm", ttl=1)
