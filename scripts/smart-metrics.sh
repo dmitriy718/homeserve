@@ -8,7 +8,9 @@ device=${SMART_DEVICE:-/dev/nvme0}
 metrics_dir=/srv/ai-node/data/node-exporter-textfile
 
 command -v smartctl >/dev/null || { echo "smartctl is not installed (smartmontools)" >&2; exit 1; }
-[[ -b $device ]] || { echo "SMART device not found: $device" >&2; exit 1; }
+# NVMe controllers (/dev/nvme0) are character devices; SATA/SAS drives are
+# block devices — accept either.
+[[ -b $device || -c $device ]] || { echo "SMART device not found: $device" >&2; exit 1; }
 
 if ! smartctl -H "$device" | grep -q 'PASSED'; then
   echo "WARNING: overall SMART health is not PASSED for $device" >&2
