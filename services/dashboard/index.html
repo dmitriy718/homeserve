@@ -116,9 +116,9 @@ const BASE_DOMAIN = "homeserve.lan";
 
 const SERVICES = [
   { name: "Authelia SSO",   purpose: "Sign-on portal — the protected services below redirect here before letting you in", sub: "auth", port: null, probe: null },
-  { name: "Open WebUI",     purpose: "Chat UI for local models",            sub: "webui",   port: 3000,  probe: "/health" },
+  { name: "Open WebUI",     purpose: "Chat UI for local models",            sub: "webui",   port: null,  probe: "/health" },
   { name: "ComfyUI",        purpose: "Image generation workflows",          sub: "comfy",   port: 8188,  probe: "/system_stats" },
-  { name: "Grafana",        purpose: "Metrics dashboards",                  sub: "grafana", port: 3001,  probe: "/api/health" },
+  { name: "Grafana",        purpose: "Metrics dashboards",                  sub: "grafana", port: null,  probe: "/api/health" },
   { name: "Uptime Kuma",    purpose: "Uptime monitoring and status pages",  sub: "kuma",    port: 3002,  probe: "/" },
   { name: "Prometheus",     purpose: "Metrics and alert evaluation",        sub: "prom",    port: 9091,  probe: "/-/ready" },
   { name: "ntfy",           purpose: "Alert notifications to your phone",   sub: "ntfy",    port: 2586,  probe: "/v1/health" },

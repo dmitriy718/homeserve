@@ -32,7 +32,7 @@ Authelia single sign-on (Caddy `forward_auth`); log in once at
 |---|---|---|---:|---|---|---|---|---|
 | Caddy | Edge proxy, internal TLS, landing dashboard | `edge-caddy` | 443 | `https://192.168.1.68` | `https://100.65.105.46` | `/srv/ai-node/data/caddy` | No | admin API `:2019` internally; no `:80` (system httpd owns it) |
 | Ollama | LLM inference API | `ai-ollama` | 11434 | `http://192.168.1.68:11434` | `http://100.65.105.46:11434` | `/srv/models/ollama` | Yes | `/api/tags` |
-| Open WebUI | Ollama chat UI | `ai-open-webui` | 3000 | `http://192.168.1.68:3000` | `http://100.65.105.46:3000` | `/srv/ai-node/data/open-webui` | Via Ollama | `/health` |
+| Open WebUI | Ollama chat UI | `ai-open-webui` | — (proxy only) | `https://webui.homeserve.lan` | `https://webui.homeserve.lan` | `/srv/ai-node/data/open-webui` | Via Ollama | `/health` |
 | Embeddings | MiniLM OpenAI-compatible embeddings | `ai-embeddings` | 8081 | `http://192.168.1.68:8081` | `http://100.65.105.46:8081` | `/srv/models/embeddings` | No (CPU) | `/health` |
 | ComfyUI | Image workflow UI/API | `ai-comfyui` | 8188 | `http://192.168.1.68:8188` | `http://100.65.105.46:8188` | `/srv/models/comfyui`, `/srv/ai-node/data/comfyui` | Yes | `/system_stats` |
 | Agent Gateway | Scoped tool API for agent jobs | `ai-agent-gateway` | 8090 | `http://192.168.1.68:8090` | `http://100.65.105.46:8090` | `/srv/ai-node/agent-platform` | No | `/health` |
@@ -40,7 +40,7 @@ Authelia single sign-on (Caddy `forward_auth`); log in once at
 | Prometheus | Metrics and network-probe history | `monitor-prometheus` | 9091 | `http://192.168.1.68:9091` | `http://100.65.105.46:9091` | `/srv/ai-node/data/prometheus` | No | `/-/ready` |
 | Alertmanager | Alert routing to ntfy (internal only) | `monitor-alertmanager` | 9093 internal | Not exposed | Not exposed | `/srv/ai-node/data/alertmanager` | No | `/-/healthy` internally |
 | ntfy | Push notifications for alerts | `monitor-ntfy` | 2586 | `http://192.168.1.68:2586` | `http://100.65.105.46:2586` | `/srv/ai-node/data/ntfy` | No | `/v1/health` |
-| Grafana | Provisioned dashboards | `monitor-grafana` | 3001 | `http://192.168.1.68:3001` | `http://100.65.105.46:3001` | `/srv/ai-node/data/grafana` | No | `/api/health` |
+| Grafana | Provisioned dashboards | `monitor-grafana` | — (proxy only) | `https://grafana.homeserve.lan` | `https://grafana.homeserve.lan` | `/srv/ai-node/data/grafana` | No | `/api/health` |
 | Node Exporter | Host metrics (internal only) | `monitor-node-exporter` | 9100 internal | Not exposed | Not exposed | None | No | `/metrics` internally |
 | NVIDIA Exporter | GPU utilization/VRAM/temp/power (internal only) | `monitor-nvidia-exporter` | 9400 internal | Not exposed | Not exposed | None | Yes | `/metrics` internally |
 | Blackbox Exporter | ICMP, DNS, and HTTP probes (internal only) | `monitor-blackbox` | 9115 internal | Not exposed | Not exposed | None | No | Prometheus targets |

@@ -46,13 +46,14 @@ sudo scripts/install.sh --lan-ip 192.168.1.50 --skip-tailscale
   visit; one login covers the session.
 - User management: `https://lldap.homeserve.lan` (behind SSO) — sign in with
   the same `admin` account and create a non-admin user for daily use.
-- Open WebUI (chat with Ollama): `https://webui.homeserve.lan` or
-  `http://LAN_IP:3000` — Open WebUI keeps its own account layer on top of
-  SSO (`WEBUI_AUTH` stays on); see the `ENABLE_SIGNUP` comment in
-  `compose/ai-node.yml` for creating the first (admin) account
-- Grafana dashboards: `https://grafana.homeserve.lan` or
-  `http://LAN_IP:3001` (Grafana's own admin credentials in
-  `/srv/ai-node/secrets/grafana.env`)
+- Open WebUI (chat with Ollama): `https://webui.homeserve.lan` — no second
+  login: it trusts the SSO session. The first user to arrive is provisioned
+  as admin automatically; make sure your LLDAP user's email matches your
+  Open WebUI account email. Proxy-only, no direct port.
+- Grafana dashboards: `https://grafana.homeserve.lan` — also signs in via
+  the SSO session (autoprovisioned as Viewer; promote in the Grafana UI).
+  Its classic login form stays available as break-glass admin access with
+  the credentials in `/srv/ai-node/secrets/grafana.env`. Proxy-only.
 - Every other URL: [SERVICE_MAP.md](../SERVICE_MAP.md)
 - Health check: `/srv/ai-node/scripts/health-check.sh`
 
