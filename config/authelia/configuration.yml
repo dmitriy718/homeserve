@@ -56,7 +56,9 @@ access_control:
     #   2. In compose/ai-node.yml, flip the auth blocks for open-webui
     #      (WEBUI_AUTH "True" + trusted header lines) and grafana
     #      (GF_AUTH_PROXY_* lines, anonymous off) — each has a commented
-    #      enable-path — and uptime-kuma (remove UPTIME_KUMA_DISABLE_AUTH).
+    #      enable-path — and uptime-kuma (delete the disableAuth row from
+    #      /srv/ai-node/data/uptime-kuma/kuma.db and restart
+    #      monitor-uptime-kuma; scripts/disable-app-auth.sh is the inverse).
     #   3. Recreate: docker compose up -d authelia open-webui grafana uptime-kuma
     - domain: auth.homeserve.lan
       policy: bypass

@@ -3,9 +3,12 @@
 `apps/` holds **curated, optional app overlays**. They prove the
 extensibility model: each one is a standalone compose file carrying the full
 `homeserv.*` label contract from [APP_MANIFEST.md](APP_MANIFEST.md), so once
-an app runs, the dashboard tile, Prometheus probe, health check, and backup
-pause all pick it up automatically — no edits to `scripts/`, `monitoring/`,
-or the base compose file.
+an app runs, the Prometheus probe, health check, and backup pause all pick
+it up automatically — no edits to `scripts/`, `monitoring/`, or the base
+compose file. The dashboard tile is the one manual step: add it to the
+`GROUPS` catalog in `services/dashboard/index.html` (the `/healthz/<key>`
+routes for all three apps already exist in the Caddyfile, so the status dot
+works as soon as the tile does).
 
 Nothing here is installed or started by default, and nothing in the base
 stack depends on these files. Enabling an app is always an explicit, opt-in
@@ -61,12 +64,15 @@ Rules that make this work:
   for real; if a tag ever fails to resolve, check the project's releases page
   and bump the pin deliberately.
 
-After the first `up`, refresh discovery so probes and the dashboard tile
-appear immediately (it also runs automatically on every stack start):
+After the first `up`, refresh discovery so probes appear immediately (it
+also runs automatically on every stack start):
 
 ```bash
 /srv/ai-node/scripts/discover-services.sh
 ```
+
+The dashboard tile is separate: add the app to the `GROUPS` catalog in
+`services/dashboard/index.html` — see [APP_MANIFEST.md](APP_MANIFEST.md).
 
 ## Caddy routes
 
@@ -82,8 +88,8 @@ sudo docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile --adapter
 
 Notes:
 
-- All three apps keep their own account layer on top of SSO (same posture as
-  Open WebUI and Grafana).
+- All three apps keep their own account layer regardless of SSO — unlike
+  Open WebUI and Grafana, which open without accounts by default.
 - Immich mobile-app uploads work through the proxy fine; if you ever set an
   upload size limit, do it in Immich, not Caddy (Caddy has no default body
   limit).

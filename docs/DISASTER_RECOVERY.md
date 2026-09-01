@@ -48,8 +48,8 @@ Estimated time: 1–2 hours plus model re-downloads.
    scratch path; the installer copies it into `/srv/ai-node`).
 3. `cd /srv/homeserve && sudo scripts/install.sh`
    This renders `.env`, generates fresh secrets, installs the systemd units
-   (including the backup, offsite-backup, restore-test, SMART, and battery
-   timers), validates the config, and starts the stack.
+   (including the backup, offsite-backup, restore-test, SMART, battery, and
+   update timers), validates the config, and starts the stack.
 
 ## 6. Restore application data
 
@@ -76,8 +76,10 @@ with `sha256sum -c ARCHIVE.sha256`, inspect it with
 
 ## 7. Secrets: restore vs regenerate
 
-Restored secrets (from either option) preserve Grafana, Speedtest, Uptime
-Kuma, and gateway logins. If the secrets directory is lost, the installer
+Restored secrets (from either option) preserve Grafana, Speedtest, and
+gateway logins (Uptime Kuma keeps no credentials — its login is a
+`disableAuth` row in its database, reapplied by
+`scripts/disable-app-auth.sh`). If the secrets directory is lost, the installer
 has already generated fresh ones — logins revert to the generated
 credentials in `/srv/ai-node/secrets/*.env` and per-application databases
 must be recreated. Never mix: an application database restored alongside a
@@ -96,10 +98,12 @@ restoring the full `secrets/` directory with the data.
 
 ## 9. Application accounts and models
 
-- Open WebUI: the first registered account becomes admin. Temporarily set
-  `ENABLE_SIGNUP: "True"` in `compose/ai-node.yml`, register, then set it
-  back to `"False"` and recreate the container (see the README).
+- Open WebUI: `WEBUI_AUTH` is `"False"` by default — no accounts exist and
+  the UI opens directly. If SSO is enabled (see
+  `config/authelia/configuration.yml`), the first SSO user to sign in
+  becomes the admin via the trusted headers.
 - Grafana: admin password is in `/srv/ai-node/secrets/grafana.env`.
-- Model weights are excluded from backups by design; re-pull them, e.g.
-  `docker exec ai-ollama ollama pull qwen3:4b`, and re-copy ComfyUI
-  checkpoints into `/srv/models/comfyui/checkpoints`.
+- All of `/srv/models` (Ollama, embeddings, and ComfyUI weights) is
+  deliberately NOT in the backup tar — it is re-downloadable. Re-pull
+  models, e.g. `docker exec ai-ollama ollama pull qwen3:4b`, and re-copy
+  ComfyUI checkpoints into `/srv/models/comfyui/checkpoints`.

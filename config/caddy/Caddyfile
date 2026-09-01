@@ -3,7 +3,9 @@
 # Serves every web UI on a subdomain of {$BASE_DOMAIN} (default homeserve.lan,
 # set BASE_DOMAIN in /srv/ai-node/.env) with automatic internal TLS: Caddy runs
 # its own local CA and issues certificates for these names (tls internal).
-# Plain HTTP on port 80 redirects to HTTPS automatically.
+# Caddy serves port 443 only: a preserved system httpd owns port 80 on this
+# host, so no http->https redirect exists — clients must use the https://
+# URLs directly.
 #
 # Single sign-on: most sites import the (sso) snippet below, which delegates
 # authentication to Authelia (forward_auth). Unauthenticated browsers are
@@ -34,6 +36,8 @@
 #   1. Copy the root certificate out of the Caddy data volume:
 #        sudo docker cp edge-caddy:/data/caddy/pki/authorities/local/root.crt \
 #          ./homeserve-root-ca.crt
+#      Then copy homeserve-root-ca.crt to each client (e.g. scp) before
+#      running the per-client trust commands below.
 #   2. Install it as a trusted root on each client:
 #        Linux:   sudo cp homeserve-root-ca.crt /usr/local/share/ca-certificates/
 #                 && sudo update-ca-certificates
@@ -46,8 +50,9 @@
 # the intended entry point everywhere.
 
 # No global options block: defaults are what we want. The admin API stays on
-# localhost:2019 inside the container and is used by the compose healthcheck;
-# automatic HTTPS sets up the port-80 redirect for every site below.
+# localhost:2019 inside the container and is used by the compose healthcheck.
+# Port 80 is owned by a preserved system httpd, so automatic HTTPS cannot set
+# up its usual port-80 redirect here — clients must use https:// directly.
 
 # SSO gate: ask Authelia whether the request carries a valid session; it
 # answers 2xx (proxied through, with the identity headers copied below into

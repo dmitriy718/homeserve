@@ -24,10 +24,11 @@ sudo scripts/install.sh
 The installer auto-detects the LAN address (confirm or override with
 `--lan-ip`), renders `.env` from `.env.example`, generates
 `secrets/*.env` with `scripts/bootstrap-secrets.sh`, copies the repository to
-`/srv/ai-node`, installs the systemd units from `host/etc/systemd/system/`
-(stack, backup service+timer, SMART-metrics service+timer), runs
+`/srv/ai-node`, installs all 13 systemd units from `host/etc/systemd/system/`
+(stack service plus backup, offsite-backup, restore-test, SMART-metrics,
+battery-metrics, and update service+timer pairs), runs
 `scripts/validate-config.sh --strict`, and only then enables and starts the
-stack and the nightly backup timer. It is safe to re-run; existing `.env`,
+stack and the shipped timers. It is safe to re-run; existing `.env`,
 secrets, and data are never overwritten.
 
 Non-interactive example:
@@ -37,6 +38,25 @@ sudo scripts/install.sh --lan-ip 192.168.1.50 --tailscale-ip 100.x.y.z
 # or, without Tailscale:
 sudo scripts/install.sh --lan-ip 192.168.1.50 --skip-tailscale
 ```
+
+## Front door: Caddy proxy
+
+The stack includes a Caddy reverse proxy on port `443` serving every UI
+as `https://<name>.homeserve.lan` (`auth`, `lldap`, `webui`, `comfy`,
+`grafana`, `kuma`, `prom`, `gateway`, `ntfy`) with certificates from its own
+internal CA, plus a landing dashboard at `https://homeserve.lan`. Port 80
+belongs to a preserved system httpd and Caddy sets up no redirect from it —
+always use the `https://` URLs directly. Two one-time client-side steps,
+both detailed in the header comments of [config/caddy/Caddyfile](../config/caddy/Caddyfile):
+
+1. Make `*.homeserve.lan` resolve to the server (router dnsmasq wildcard,
+   Pi-hole local DNS, or per-device `/etc/hosts` entries).
+2. Trust the Caddy root CA on each device (copy it out of the `edge-caddy`
+   container with `docker cp`, then onto the client).
+
+Do these before the first look below: Open WebUI and Grafana publish no
+ports at all (proxy only), and the other `https://` URLs need them too.
+Most legacy per-service ports keep working until then.
 
 ## First look
 
@@ -54,26 +74,9 @@ logins on, follow the three steps in `config/authelia/configuration.yml`;
 the LLDAP admin login is `admin` with `LLDAP_LDAP_USER_PASS` from
 `/srv/ai-node/secrets/lldap.env`.
 - Every other URL: [SERVICE_MAP.md](../SERVICE_MAP.md)
-- Health check: `/srv/ai-node/scripts/health-check.sh`
+- Health check, on the server: `/srv/ai-node/scripts/health-check.sh`
 
-Pull a model before chatting: `docker exec ai-ollama ollama pull qwen3:4b`.
-
-## Front door: Caddy proxy
-
-The stack includes a Caddy reverse proxy on ports `80`/`443` serving every UI
-as `https://<name>.homeserve.lan` (`auth`, `lldap`, `webui`, `comfy`,
-`grafana`, `kuma`, `prom`, `gateway`, `ntfy`) with certificates from its own
-internal CA, plus a landing dashboard at `https://homeserve.lan`. All of them
-except `gateway` (bearer-key API) and `ntfy` (phone-app webhooks) are gated
-by Authelia single sign-on. Two one-time client-side steps,
-both detailed in the header comments of [config/caddy/Caddyfile](../config/caddy/Caddyfile):
-
-1. Make `*.homeserve.lan` resolve to the server (router dnsmasq wildcard,
-   Pi-hole local DNS, or per-device `/etc/hosts` entries).
-2. Trust the Caddy root CA on each device (copy it out of the `edge-caddy`
-   container with `docker cp`).
-
-Until then, the legacy per-service ports keep working unchanged.
+On the server, pull a model before chatting: `docker exec ai-ollama ollama pull qwen3:4b`.
 
 ## Alerts
 
