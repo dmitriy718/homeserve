@@ -518,10 +518,12 @@ services:
       AUTHELIA_SESSION_SECRET_FILE: /run/secrets/authelia_session_secret
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/authelia_storage_secret
       AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE: /run/secrets/authelia_ldap_bind_password
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /run/secrets/authelia_jwt_secret
     secrets:
       - authelia_session_secret
       - authelia_storage_secret
       - authelia_ldap_bind_password
+      - authelia_jwt_secret
     volumes:
       - ../config/authelia/configuration.yml:/config/configuration.yml:ro
       - /srv/ai-node/data/authelia:/config
@@ -605,3 +607,7 @@ secrets:
   # secrets/lldap.env (bootstrap-secrets.sh keeps them in sync).
   authelia_ldap_bind_password:
     file: ../secrets/authelia-ldap-bind.secret
+  # Password-reset JWT secret (AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE);
+  # required by Authelia 4.39 at startup even with the filesystem notifier.
+  authelia_jwt_secret:
+    file: ../secrets/authelia-jwt.secret

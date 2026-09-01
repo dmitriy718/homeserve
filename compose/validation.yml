@@ -31,3 +31,5 @@ secrets:
     file: ../secrets/authelia-storage.secret.example
   authelia_ldap_bind_password:
     file: ../secrets/authelia-ldap-bind.secret.example
+  authelia_jwt_secret:
+    file: ../secrets/authelia-jwt.secret.example
