@@ -7,6 +7,8 @@ case ${1:-} in
   *) echo "Usage: $0 [--pull]" >&2; exit 2 ;;
 esac
 
+[[ -d /srv/ai-node ]] || echo "warning: not the ai-node host; showing THIS machine's status" >&2
+
 nvidia-smi
 echo
 echo "GPU processes:"

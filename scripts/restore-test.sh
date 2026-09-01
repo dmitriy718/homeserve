@@ -12,6 +12,8 @@ if ((EUID != 0)); then
   exec sudo -- "$0" "$@"
 fi
 
+[[ -f /srv/ai-node/compose/ai-node.yml ]] || { echo "must run on the ai-node host" >&2; exit 1; }
+
 backup_dir=${BACKUP_DEST:-/srv/backups/local}
 metrics_dir=/srv/ai-node/data/node-exporter-textfile
 success=0
@@ -59,6 +61,18 @@ archive=$(find "$backup_dir" -maxdepth 1 -type f -name 'ai-node-*.tar.zst' -prin
   cd "$backup_dir"
   sha256sum -c "$(basename "$archive").sha256" >/dev/null
 )
+
+# Pre-flight: refuse to extract without room in /tmp for the archive
+# (compressed size is a lower bound on the extracted size). Same formula as
+# scripts/backup.sh: 1.5x the archive size.
+archive_size=$(stat -c %s "$archive")
+required_free=$((archive_size + archive_size / 2))
+free_bytes=$(df -B1 --output=avail /tmp | awk 'NR==2 {print $1}')
+if [[ $free_bytes =~ ^[0-9]+$ ]] && ((free_bytes < required_free)); then
+  echo "Not enough free space in /tmp: $((free_bytes / 1024 / 1024 / 1024)) GiB available," \
+    "need at least $((required_free / 1024 / 1024 / 1024)) GiB" >&2
+  exit 1
+fi
 
 scratch=$(mktemp -d /tmp/ai-node-restore-test.XXXXXX)
 chmod 0700 "$scratch"

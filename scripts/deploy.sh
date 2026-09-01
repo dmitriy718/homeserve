@@ -64,6 +64,14 @@ if $check && $dry_run; then
   exit 2
 fi
 
+# Wrong-machine guard: this script installs and enables systemd units in
+# /etc/systemd/system and manages the stack, so refuse to run anywhere but
+# the ai-node host unless explicitly overridden.
+if [[ ! -d $checkout/.git && ${AI_NODE_ON_SERVER:-} != 1 ]]; then
+  echo "must run on the ai-node host (or set AI_NODE_ON_SERVER=1)" >&2
+  exit 1
+fi
+
 git=(git -c safe.directory="$checkout" -C "$checkout")
 
 if [[ ! -d $checkout/.git ]]; then

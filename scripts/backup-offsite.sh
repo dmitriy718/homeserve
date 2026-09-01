@@ -10,6 +10,8 @@ if ((EUID != 0)); then
   exec sudo -- "$0" "$@"
 fi
 
+[[ -f /srv/ai-node/compose/ai-node.yml ]] || { echo "must run on the ai-node host" >&2; exit 1; }
+
 env_file=/srv/ai-node/secrets/restic.env
 if [[ -f $env_file ]]; then
   # shellcheck source=/dev/null

@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
+# AGENT_KEY_FILE defaults to the gateway key path on the ai-node server;
+# on a workstation clone set AGENT_KEY_FILE explicitly to a local copy of
+# the key file.
 set -euo pipefail
 base="${AGENT_GATEWAY_URL:-http://192.168.1.68:8090}"
 key_file="${AGENT_KEY_FILE:-/srv/ai-node/secrets/agent-gateway.env}"
 [[ -r $key_file ]] || { echo "Cannot read gateway key file: $key_file" >&2; exit 1; }
 key="$(sed -n 's/^AGENT_GATEWAY_KEY=//p' "$key_file" | tail -n1)"
 [[ ${#key} -ge 32 ]] || { echo "Gateway key is missing or shorter than 32 characters" >&2; exit 1; }
+# Pass the bearer key via a curl config file on stdin (process substitution)
+# so it never appears in curl's argv and stays out of `ps`.
+auth() { curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$key") "$@"; }
 case "${1:-status}" in
-  status|doctor) curl -fsS -H "Authorization: Bearer $key" "$base/health"; echo; curl -fsS -H "Authorization: Bearer $key" "$base/tools"; echo ;;
-  tools) curl -fsS -H "Authorization: Bearer $key" "$base/openapi.json" ;;
+  status|doctor) auth -fsS "$base/health"; echo; auth -fsS "$base/tools"; echo ;;
+  tools) auth -fsS "$base/openapi.json" ;;
   *) echo "usage: agentctl {status|doctor|tools}" >&2; exit 2 ;;
 esac

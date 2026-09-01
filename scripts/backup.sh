@@ -5,6 +5,8 @@ if ((EUID != 0)); then
   exec sudo -- "$0" "$@"
 fi
 
+[[ -f /srv/ai-node/compose/ai-node.yml ]] || { echo "must run on the ai-node host" >&2; exit 1; }
+
 backup_dest=${BACKUP_DEST:-/srv/backups/local}
 case "$backup_dest" in
   /srv/backups/*|/mnt/*|/media/*) ;;
@@ -114,7 +116,7 @@ if ! tar --zstd --acls --xattrs -cpf "$partial" \
   --exclude='ai-node/data/node-exporter-textfile' \
   --exclude='ai-node/logs' \
   --exclude='ai-node/agent-platform/cache' \
-  --exclude='backups' \
+  --exclude='ai-node/backups' \
   -C /srv ai-node repos; then
   exit 1
 fi

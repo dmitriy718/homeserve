@@ -5,6 +5,8 @@ if ((EUID != 0)); then
   exec sudo -- "$0" "$@"
 fi
 
+[[ -f /srv/ai-node/compose/ai-node.yml ]] || { echo "must run on the ai-node host" >&2; exit 1; }
+
 skip_backup=false
 force=false
 for arg in "$@"; do
@@ -37,19 +39,13 @@ cd /srv/ai-node/compose
 
 # Include any apps/ overlay files that are actually in use, so that
 # `up -d --remove-orphans` does not prune app containers. The set of active
-# compose files is read back from a running container's own labels; fall back
-# to the base file only.
+# compose files is read back from containers' own labels (stopped containers
+# included, since labels persist); scripts/compose-files.sh falls back to
+# the base file only.
 compose=(docker compose --env-file ../.env)
-config_files=$(docker ps --filter label=com.docker.compose.project=ai-node \
-  --format '{{index .Labels "com.docker.compose.project.config_files"}}' 2>/dev/null \
-  | tr ',' '\n' | grep -v '^$' | sort -u || true)
-if [[ -n $config_files ]]; then
-  while IFS= read -r f; do
-    [[ -f $f ]] && compose+=(-f "$f")
-  done <<< "$config_files"
-else
-  compose+=(-f ai-node.yml)
-fi
+while IFS= read -r f; do
+  compose+=(-f "$f")
+done < <(/srv/ai-node/scripts/compose-files.sh)
 declare -A previous_image_ids=()
 
 while IFS=$'\t' read -r service image_ref; do
@@ -57,7 +53,7 @@ while IFS=$'\t' read -r service image_ref; do
   if [[ -n $container ]]; then
     previous_image_ids["$image_ref"]=$(docker inspect -f '{{.Image}}' "$container")
   fi
-done < <("${compose[@]}" config --format json | jq -r '.services | to_entries[] | [.key, .value.image] | @tsv')
+done < <("${compose[@]}" config --format json | jq -r '.services | to_entries[] | select(.value.image != null) | [.key, .value.image] | @tsv')
 
 restore_image_tags() {
   local image_ref

@@ -71,7 +71,7 @@ run() {
   shift 2
   while [[ $# -gt 0 && $1 != -- ]]; do
     case $1 in
-      --ttl) ttl=$2; shift 2 ;;
+      --ttl) ttl=${2:?"--ttl requires a SECONDS value"}; shift 2 ;;
       *) usage ;;
     esac
   done
@@ -82,9 +82,17 @@ run() {
   echo "gpu-lock: lease acquired by '$holder' (kind=$kind, ttl=${ttl}s)" >&2
   local interval=$(( ttl / 3 > 5 ? ttl / 3 : 5 ))
   (
+    failures=0
     while :; do
       sleep "$interval"
-      curl -fsS -X POST "$API/leases/$holder/heartbeat" >/dev/null 2>&1 || true
+      if curl -fsS -X POST "$API/leases/$holder/heartbeat" >/dev/null 2>&1; then
+        failures=0
+      else
+        failures=$((failures + 1))
+        if ((failures == 3)); then
+          echo "gpu-lock: heartbeat failed 3 times in a row; the lease for '$holder' may be lost" >&2
+        fi
+      fi
     done
   ) &
   # Globals, not locals: the EXIT trap fires after run() returns, when locals
@@ -109,7 +117,7 @@ case $cmd in
     while [[ $# -gt 0 ]]; do
       case $1 in
         --wait) wait=true; shift ;;
-        --ttl) ttl=$2; shift 2 ;;
+        --ttl) ttl=${2:?"--ttl requires a SECONDS value"}; shift 2 ;;
         *) usage ;;
       esac
     done
