@@ -81,7 +81,8 @@ services:
     volumes:
       - /srv/ai-node/data/immich/model-cache:/cache
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # The ML image is Python (gunicorn) — no node, curl, or wget aboard.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3003/ping', timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 10
