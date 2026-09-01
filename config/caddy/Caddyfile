@@ -111,7 +111,7 @@ lldap.{$BASE_DOMAIN:homeserve.lan} {
 		reverse_proxy grafana:3000
 	}
 	handle /healthz/kuma {
-		rewrite * /
+		rewrite * /dashboard
 		reverse_proxy uptime-kuma:3001
 	}
 	handle /healthz/prom {
@@ -135,7 +135,7 @@ lldap.{$BASE_DOMAIN:homeserve.lan} {
 		reverse_proxy embeddings:8080
 	}
 	handle /healthz/speedtest {
-		rewrite * /
+		rewrite * /login
 		reverse_proxy speedtest-tracker:80
 	}
 	handle /healthz/jellyfin {
