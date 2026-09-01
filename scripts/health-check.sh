@@ -73,12 +73,10 @@ if docker info >/dev/null 2>&1; then
 fi
 if ! $dynamic_checks_done; then
   check_url "Ollama API" "${base}:11434/api/tags"
-  check_url "Open WebUI" "${base}:3000/health"
   check_url "Embeddings" "${base}:8081/health"
   check_url "ComfyUI" "${base}:8188/system_stats"
   check_url "Agent Gateway" "${base}:8090/health"
   check_url "Prometheus" "${base}:9091/-/healthy"
-  check_url "Grafana" "${base}:3001/api/health"
   check_url "Uptime Kuma" "${base}:3002/"
   check_url "Speedtest Tracker" "${base}:8765/"
 fi

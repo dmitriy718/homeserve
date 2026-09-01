@@ -94,7 +94,6 @@ services:
       homeserv.name: "Open WebUI"
       homeserv.purpose: "Chat UI for local models"
       homeserv.subdomain: "webui"
-      homeserv.legacy.port: "3000"
       homeserv.probe.url: "http://open-webui:8080/health"
       homeserv.backup.pause: "true"
     depends_on:
@@ -102,11 +101,17 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      # First run: temporarily set ENABLE_SIGNUP to "True", register the first
-      # account (it becomes the admin), then set it back to "False" and
-      # recreate the container.
+      # With trusted-header auth, the first user who arrives through the SSO
+      # proxy is provisioned automatically and becomes the admin; later users
+      # get regular accounts. ENABLE_SIGNUP stays off: accounts come from SSO
+      # only, never from the public registration form.
       WEBUI_AUTH: "True"
       ENABLE_SIGNUP: "False"
+      # Single sign-on: trust the identity headers Caddy injects after
+      # Authelia authenticates the browser. Users whose LLDAP email matches
+      # their Open WebUI account are signed in automatically.
+      WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "Remote-Email"
+      WEBUI_AUTH_TRUSTED_NAME_HEADER: "Remote-Name"
       ENABLE_OPENAI_API: "False"
       ENABLE_OLLAMA_API: "True"
       DEFAULT_MODEL_PARAMS: "{\"function_calling\":\"native\"}"
@@ -114,10 +119,9 @@ services:
     volumes:
       - /srv/ai-node/data/open-webui:/app/backend/data
       - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
-    # Legacy direct access; the Caddy proxy is the front door for UIs.
-    ports:
-      - "${LAN_IP}:3000:8080"
-      - "${TAILSCALE_IP}:3000:8080"
+    # No direct port: with trusted-header auth on, any direct path to the
+    # container would allow impersonating users via forged Remote-* headers.
+    # The Caddy proxy is the only way in.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s
@@ -326,7 +330,6 @@ services:
       homeserv.name: "Grafana"
       homeserv.purpose: "Metrics dashboards"
       homeserv.subdomain: "grafana"
-      homeserv.legacy.port: "3001"
       homeserv.probe.url: "http://grafana:3000/api/health"
       homeserv.backup.pause: "true"
     depends_on:
@@ -339,14 +342,21 @@ services:
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Single sign-on: trust the identity headers Caddy injects after
+      # Authelia authenticates the browser. Autoprovisioned users start as
+      # Viewer; promote them in the Grafana UI. The classic login form stays
+      # enabled as break-glass admin access (secrets/grafana.env).
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: "Remote-Email"
+      GF_AUTH_PROXY_HEADERS: "Email:Remote-Email Name:Remote-Name"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
     volumes:
       - /srv/ai-node/data/grafana:/var/lib/grafana
       - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/grafana/dashboards:/var/lib/grafana-dashboards:ro
-    # Legacy direct access; the Caddy proxy is the front door for UIs.
-    ports:
-      - "${LAN_IP}:3001:3000"
-      - "${TAILSCALE_IP}:3001:3000"
+    # No direct port: with auth-proxy header trust on, any direct path to the
+    # container would allow impersonating users via forged Remote-* headers.
+    # The Caddy proxy is the only way in.
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || exit 1"]
       interval: 30s
