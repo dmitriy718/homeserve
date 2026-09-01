@@ -141,28 +141,28 @@ fi
 
 if ((behind == 0)); then
   echo "$checkout is already up to date with $upstream."
-  echo "For image-only stack updates, run: $checkout/scripts/update-stack.sh"
-  exit 0
-fi
-
-if $dry_run; then
-  echo
-  echo "Would fast-forward $branch by $behind commit(s):"
-  "${git[@]}" log --oneline "HEAD..$upstream"
-  echo
-  "${git[@]}" diff --stat "HEAD..$upstream"
-  changed_units=$("${git[@]}" diff --name-only "HEAD..$upstream" -- host/etc/systemd/system/)
-  if [[ -n $changed_units ]]; then
+  pulled=false
+else
+  if $dry_run; then
     echo
-    echo "Systemd units that would be re-installed (plus daemon-reload):"
-    echo "$changed_units"
+    echo "Would fast-forward $branch by $behind commit(s):"
+    "${git[@]}" log --oneline "HEAD..$upstream"
+    echo
+    "${git[@]}" diff --stat "HEAD..$upstream"
+    changed_units=$("${git[@]}" diff --name-only "HEAD..$upstream" -- host/etc/systemd/system/)
+    if [[ -n $changed_units ]]; then
+      echo
+      echo "Systemd units that would be re-installed (plus daemon-reload):"
+      echo "$changed_units"
+    fi
+    echo
+    echo "Would then run: bootstrap-secrets.sh, validate-config.sh --strict, update-stack.sh"
+    exit 0
   fi
-  echo
-  echo "Would then run: bootstrap-secrets.sh, validate-config.sh --strict, update-stack.sh"
-  exit 0
-fi
 
-"${git[@]}" pull --ff-only
+  "${git[@]}" pull --ff-only
+  pulled=true
+fi
 
 # Idempotent: generates only secret types that do not exist yet, so newly
 # added secrets from the pull are picked up without touching existing ones.
@@ -199,4 +199,8 @@ else
 fi
 
 "$checkout/scripts/validate-config.sh" --strict
-"$checkout/scripts/update-stack.sh"
+if $pulled || ((${#changed_units[@]})); then
+  "$checkout/scripts/update-stack.sh"
+else
+  echo "Nothing changed; for image-only stack updates, run: $checkout/scripts/update-stack.sh"
+fi

@@ -30,7 +30,7 @@ Authelia single sign-on (Caddy `forward_auth`); log in once at
 
 | Service | Purpose | Container | Port | LAN URL | Tailscale URL | Persistent Data | GPU | Health Check |
 |---|---|---|---:|---|---|---|---|---|
-| Caddy | Edge proxy, internal TLS, landing dashboard | `edge-caddy` | 80, 443 | `https://192.168.1.10` | `https://100.64.0.10` | `/srv/ai-node/data/caddy` | No | admin API `:2019` internally |
+| Caddy | Edge proxy, internal TLS, landing dashboard | `edge-caddy` | 443 | `https://192.168.1.10` | `https://100.64.0.10` | `/srv/ai-node/data/caddy` | No | admin API `:2019` internally; no `:80` (system httpd owns it) |
 | Ollama | LLM inference API | `ai-ollama` | 11434 | `http://192.168.1.10:11434` | `http://100.64.0.10:11434` | `/srv/models/ollama` | Yes | `/api/tags` |
 | Open WebUI | Ollama chat UI | `ai-open-webui` | 3000 | `http://192.168.1.10:3000` | `http://100.64.0.10:3000` | `/srv/ai-node/data/open-webui` | Via Ollama | `/health` |
 | Embeddings | MiniLM OpenAI-compatible embeddings | `ai-embeddings` | 8081 | `http://192.168.1.10:8081` | `http://100.64.0.10:8081` | `/srv/models/embeddings` | No (CPU) | `/health` |
