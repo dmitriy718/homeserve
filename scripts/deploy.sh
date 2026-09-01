@@ -164,6 +164,25 @@ else
   pulled=true
 fi
 
+# Single-file bind mounts pin the inode captured at container start; a git
+# pull replaces the file (new inode), leaving running containers reading the
+# OLD config. Force-recreate the affected services when these files changed.
+declare -A mounted_configs=(
+  [config/caddy/Caddyfile]=caddy
+  [monitoring/prometheus.yml]=prometheus
+  [monitoring/alerts.yml]=prometheus
+  [monitoring/alertmanager.yml]=alertmanager
+  [config/authelia/configuration.yml]=authelia
+)
+recreate=()
+if $pulled; then
+  for cfg in "${!mounted_configs[@]}"; do
+    if [[ -n $("${git[@]}" diff --name-only 'HEAD@{1}..HEAD' -- "$cfg") ]]; then
+      recreate+=("${mounted_configs[$cfg]}")
+    fi
+  done
+fi
+
 # Idempotent: generates only secret types that do not exist yet, so newly
 # added secrets from the pull are picked up without touching existing ones.
 "$checkout/scripts/bootstrap-secrets.sh"
@@ -203,4 +222,10 @@ if $pulled || ((${#changed_units[@]})); then
   "$checkout/scripts/update-stack.sh"
 else
   echo "Nothing changed; for image-only stack updates, run: $checkout/scripts/update-stack.sh"
+fi
+
+if ((${#recreate[@]})); then
+  mapfile -t recreate < <(printf '%s\n' "${recreate[@]}" | sort -u)
+  echo "Force-recreating services whose bind-mounted config changed: ${recreate[*]}"
+  (cd "$checkout/compose" && docker compose --env-file ../.env -f ai-node.yml up -d --force-recreate "${recreate[@]}")
 fi
