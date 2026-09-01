@@ -426,10 +426,12 @@ services:
       homeserv.legacy.port: "3002"
       homeserv.probe.url: "http://uptime-kuma:3001/"
       homeserv.backup.pause: "true"
-    environment:
-      # Auth OFF by default (trusted LAN): no login, full access. Remove this
-      # line (and flip the Authelia ACLs) to require Kuma's own account.
-      UPTIME_KUMA_DISABLE_AUTH: "1"
+    # Auth OFF by default (trusted LAN). Kuma has NO env var for this —
+    # UPTIME_KUMA_DISABLE_AUTH does not exist in the server code (verified
+    # against 2.5.0). The setting lives in its database, applied once by
+    # scripts/disable-app-auth.sh (or manually: Settings -> Security ->
+    # Disable Auth in the Kuma UI). To re-enable: delete the disableAuth row
+    # from /srv/ai-node/data/uptime-kuma/kuma.db and restart.
     volumes:
       - /srv/ai-node/data/uptime-kuma:/app/data
     # Legacy direct access; the Caddy proxy is the front door for UIs.
