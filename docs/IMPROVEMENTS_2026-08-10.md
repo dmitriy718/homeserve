@@ -49,3 +49,5 @@ sudo systemctl reload ssh
 Keep the current SSH session open while testing a second public-key login after reloading SSH. The timer writes to the existing local backup destination; a separate mounted `BACKUP_DEST` is still required for disaster recovery.
 
 Prometheus evaluates and displays the new alerts at `/alerts`. No external notifications are sent because Alertmanager contact details are intentionally not guessed.
+
+> **Addendum (2026-09-01):** the last sentence is superseded — Alertmanager now posts alerts to the self-hosted ntfy service (topics `homeserve-alerts` and `homeserve-alerts-critical`); see `monitoring/alertmanager.yml` and the README.

@@ -30,6 +30,8 @@ Persistent application data is under `/srv/ai-node/data` and is ignored by Git. 
 
 ## Routine operation
 
+All commands in this and the following sections run **on the server** — SSH in first (see the addresses above).
+
 Run a concise host and service overview:
 
 ```bash
@@ -102,9 +104,9 @@ The GitHub Actions foundation is documented in [config/github-runner/README.md](
 
 ## Monitoring
 
-Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Firing alerts go to Alertmanager, which posts them to the self-hosted ntfy service (`http://192.168.1.68:2586` or `https://ntfy.homeserve.lan`): subscribe with the ntfy phone app to topics `homeserve-alerts` and `homeserve-alerts-critical`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts, and requires the generated admin login. Speedtest Tracker records a daily test. Uptime Kuma uses SQLite and has an initialized admin account; Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
+Prometheus scrapes host, GPU, and internal service metrics plus blackbox probes for the gateway, Internet ICMP, DNS, and HTTP endpoints. It evaluates local alerts for unavailable targets and probes, disk and memory pressure, high GPU temperature, failed GPU telemetry, and stale or missing verified backups; inspect them at `http://192.168.1.68:9091/alerts`. Firing alerts go to Alertmanager, which posts them to the self-hosted ntfy service (`http://192.168.1.68:2586` or `https://ntfy.homeserve.lan`): subscribe with the ntfy phone app to topics `homeserve-alerts` and `homeserve-alerts-critical`. Grafana provisions the Prometheus datasource and `AI Node Overview` dashboard from files, including verified-backup age and firing-alert counts, and is anonymous-Admin by default — the generated admin login in `secrets/grafana.env` is break-glass. Speedtest Tracker records a daily test. Uptime Kuma's auth is disabled by `scripts/disable-app-auth.sh` (a `disableAuth` setting upserted into its SQLite database); Prometheus blackbox monitoring is active independently of user-defined Kuma monitors.
 
-Generated Grafana, Speedtest Tracker, Uptime Kuma, and LLDAP/Authelia credentials are stored only in `/srv/ai-node/secrets/*.env` (and the Authelia Docker-secret files next to them) and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
+Generated Grafana, Speedtest Tracker, and LLDAP/Authelia credentials are stored only in `/srv/ai-node/secrets/*.env` (and the Authelia Docker-secret files next to them) and the corresponding service databases. Retrieve them locally with `sudo`, do not copy them into this repository, and rotate them from the applications after first login if desired.
 
 ## Backup and restore
 

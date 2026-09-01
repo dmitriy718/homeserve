@@ -5,13 +5,17 @@ Tailscale address: `100.65.105.46`
 
 ## Front door (Caddy proxy)
 
-Caddy publishes `80` (redirect only) and `443` on both addresses and serves
-every UI on a subdomain of `BASE_DOMAIN` (default `homeserve.lan`) with
-automatic internal TLS. See `config/caddy/Caddyfile` for DNS and CA-trust
-setup. The per-service ports below remain published as legacy direct access
-(and bypass SSO). All subdomains except `gateway.` and `ntfy.` sit behind
-Authelia single sign-on (Caddy `forward_auth`); log in once at
-`https://auth.homeserve.lan`.
+Caddy publishes `443` only on both addresses — port 80 belongs to a
+preserved system httpd, so no http→https redirect exists; use the
+`https://` URLs below directly. It serves every UI on a subdomain of
+`BASE_DOMAIN` (default `homeserve.lan`) with automatic internal TLS. See
+`config/caddy/Caddyfile` for DNS and CA-trust setup. The per-service ports
+below remain published as legacy direct access (Open WebUI and Grafana
+publish none — they are proxy-only). Authelia single sign-on (Caddy
+`forward_auth`) is installed in front of all subdomains except `gateway.`
+and `ntfy.`, but its ACLs bypass all of `homeserve.lan` by default
+(trusted-LAN model), so no login is required; turning SSO on is documented
+in `config/authelia/configuration.yml`.
 
 | URL | Service |
 |---|---|
@@ -68,11 +72,12 @@ into the compose command (see [docs/APPS.md](docs/APPS.md)):
 docker compose --env-file .env -f compose/ai-node.yml -f apps/jellyfin.yml up -d
 ```
 
-Each overlay carries the full `homeserv.*` label contract, so dashboard
-tiles, Prometheus probes, health checks, and backup pauses pick it up
-automatically once it runs. The Caddy subdomain routes are opt-in too —
-the site block must be added to `config/caddy/Caddyfile` per app (exact
-blocks in docs/APPS.md).
+Each overlay carries the full `homeserv.*` label contract, so Prometheus
+probes, health checks, and backup pauses pick it up automatically once it
+runs; the dashboard tile is a manual entry in
+`services/dashboard/index.html`. The Caddy subdomain routes already exist
+in `config/caddy/Caddyfile` — they answer 502 until the overlay runs
+(see docs/APPS.md).
 
 | App | Purpose | Overlay | Port | LAN URL | Subdomain (once routed) | Persistent Data |
 |---|---|---|---:|---|---|---|

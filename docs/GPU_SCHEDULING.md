@@ -42,11 +42,13 @@ leases across a crash would revive stale holders, which is worse.
 
 ### Host-side / agent jobs: `scripts/gpu-lock.sh`
 
+On the server (the script lives at `/srv/ai-node/scripts/gpu-lock.sh`):
+
 ```bash
-gpu-lock.sh status                          # current holder + queue
-gpu-lock.sh acquire my-job image --wait     # block until granted
-gpu-lock.sh release my-job
-gpu-lock.sh run my-job image -- python train.py   # acquire, heartbeat, run, release
+/srv/ai-node/scripts/gpu-lock.sh status                          # current holder + queue
+/srv/ai-node/scripts/gpu-lock.sh acquire my-job image --wait     # block until granted
+/srv/ai-node/scripts/gpu-lock.sh release my-job
+/srv/ai-node/scripts/gpu-lock.sh run my-job image -- python train.py   # acquire, heartbeat, run, release
 ```
 
 `run` is the recommended shape: it acquires (waiting for the lease), sends
