@@ -101,17 +101,15 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      # With trusted-header auth, the first user who arrives through the SSO
-      # proxy is provisioned automatically and becomes the admin; later users
-      # get regular accounts. ENABLE_SIGNUP stays off: accounts come from SSO
-      # only, never from the public registration form.
-      WEBUI_AUTH: "True"
+      # Auth OFF by default (trusted LAN): anyone on the network gets full
+      # admin access, no login. To enable login: set WEBUI_AUTH "True",
+      # uncomment the trusted-header lines below, and flip the Authelia ACLs
+      # in config/authelia/configuration.yml (its header documents all three
+      # steps). With trusted headers on, the first SSO user becomes admin.
+      WEBUI_AUTH: "False"
       ENABLE_SIGNUP: "False"
-      # Single sign-on: trust the identity headers Caddy injects after
-      # Authelia authenticates the browser. Users whose LLDAP email matches
-      # their Open WebUI account are signed in automatically.
-      WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "Remote-Email"
-      WEBUI_AUTH_TRUSTED_NAME_HEADER: "Remote-Name"
+      # WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "Remote-Email"
+      # WEBUI_AUTH_TRUSTED_NAME_HEADER: "Remote-Name"
       ENABLE_OPENAI_API: "False"
       ENABLE_OLLAMA_API: "True"
       DEFAULT_MODEL_PARAMS: "{\"function_calling\":\"native\"}"
@@ -119,9 +117,9 @@ services:
     volumes:
       - /srv/ai-node/data/open-webui:/app/backend/data
       - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
-    # No direct port: with trusted-header auth on, any direct path to the
-    # container would allow impersonating users via forged Remote-* headers.
-    # The Caddy proxy is the only way in.
+    # Proxy-only by design: if trusted-header auth is ever enabled (see the
+    # commented lines below), any direct port would become an impersonation
+    # path via forged Remote-* headers. One front door, no exceptions.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s
@@ -342,21 +340,25 @@ services:
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
-      # Single sign-on: trust the identity headers Caddy injects after
-      # Authelia authenticates the browser. Autoprovisioned users start as
-      # Viewer; promote them in the Grafana UI. The classic login form stays
-      # enabled as break-glass admin access (secrets/grafana.env).
-      GF_AUTH_PROXY_ENABLED: "true"
-      GF_AUTH_PROXY_HEADER_NAME: "Remote-Email"
-      GF_AUTH_PROXY_HEADERS: "Email:Remote-Email Name:Remote-Name"
-      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      # Auth OFF by default (trusted LAN): anonymous access with Admin role,
+      # no login. To enable login: comment the two anonymous lines, uncomment
+      # the GF_AUTH_PROXY_* block (SSO header trust; autoprovisioned users
+      # start as Viewer), and flip the Authelia ACLs in
+      # config/authelia/configuration.yml. The classic login form stays as
+      # break-glass access either way (secrets/grafana.env).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      # GF_AUTH_PROXY_ENABLED: "true"
+      # GF_AUTH_PROXY_HEADER_NAME: "Remote-Email"
+      # GF_AUTH_PROXY_HEADERS: "Email:Remote-Email Name:Remote-Name"
+      # GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
     volumes:
       - /srv/ai-node/data/grafana:/var/lib/grafana
       - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/grafana/dashboards:/var/lib/grafana-dashboards:ro
-    # No direct port: with auth-proxy header trust on, any direct path to the
-    # container would allow impersonating users via forged Remote-* headers.
-    # The Caddy proxy is the only way in.
+    # Proxy-only by design: if auth-proxy header trust is ever enabled (see
+    # the commented GF_AUTH_PROXY_* block), any direct port would become an
+    # impersonation path via forged Remote-* headers. One front door.
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || exit 1"]
       interval: 30s
@@ -424,6 +426,10 @@ services:
       homeserv.legacy.port: "3002"
       homeserv.probe.url: "http://uptime-kuma:3001/"
       homeserv.backup.pause: "true"
+    environment:
+      # Auth OFF by default (trusted LAN): no login, full access. Remove this
+      # line (and flip the Authelia ACLs) to require Kuma's own account.
+      UPTIME_KUMA_DISABLE_AUTH: "1"
     volumes:
       - /srv/ai-node/data/uptime-kuma:/app/data
     # Legacy direct access; the Caddy proxy is the front door for UIs.
