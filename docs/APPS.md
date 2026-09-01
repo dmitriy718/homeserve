@@ -68,34 +68,13 @@ appear immediately (it also runs automatically on every stack start):
 /srv/ai-node/scripts/discover-services.sh
 ```
 
-## Caddy routes (opt-in, like the apps)
+## Caddy routes
 
-The overlays cannot touch `config/caddy/Caddyfile` (and must not — an app
-you never enabled would leave a dead route). Add one site block per enabled
-app, following the existing protected-route pattern (`import sso` puts the
-app behind Authelia like the other UIs):
-
-```caddy
-jellyfin.{$BASE_DOMAIN:homeserve.lan} {
-	tls internal
-	import sso
-	reverse_proxy jellyfin:8096
-}
-
-immich.{$BASE_DOMAIN:homeserve.lan} {
-	tls internal
-	import sso
-	reverse_proxy immich-server:2283
-}
-
-cloud.{$BASE_DOMAIN:homeserve.lan} {
-	tls internal
-	import sso
-	reverse_proxy nextcloud:80
-}
-```
-
-Then reload Caddy (the Caddyfile is bind-mounted into the container):
+Routes for all three apps (`jellyfin.`, `immich.`, `cloud.`) already exist in
+`config/caddy/Caddyfile` behind the same SSO snippet as the core UIs. They
+answer 502 while the app is not running, and start working as soon as the
+overlay is started — nothing to edit. After changing the Caddyfile itself,
+reload with:
 
 ```bash
 sudo docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile

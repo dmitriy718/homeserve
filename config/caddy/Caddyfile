@@ -26,7 +26,8 @@
 #       192.168.1.68 homeserve.lan auth.homeserve.lan lldap.homeserve.lan \
 #         webui.homeserve.lan comfy.homeserve.lan grafana.homeserve.lan \
 #         kuma.homeserve.lan prom.homeserve.lan gateway.homeserve.lan \
-#         ntfy.homeserve.lan
+#         ntfy.homeserve.lan jellyfin.homeserve.lan immich.homeserve.lan \
+#         cloud.homeserve.lan
 #
 # Trusting the internal CA on client devices (needed to avoid browser
 # warnings; TLS is still encrypted without it):
@@ -40,9 +41,9 @@
 #        Windows: import into "Trusted Root Certification Authorities"
 #        Android/iOS: install as a CA certificate in security settings
 #
-# Direct per-service ports (e.g. 192.168.1.68:3000) remain published as legacy
-# access; this proxy is the intended entry point. NOTE: the legacy ports
-# bypass SSO — consider unpublishing a port if that matters for a service.
+# Some services keep direct per-service ports as legacy access (e.g. ComfyUI
+# on 192.168.1.68:8188); Open WebUI and Grafana are proxy-only. This proxy is
+# the intended entry point everywhere.
 
 # No global options block: defaults are what we want. The admin API stays on
 # localhost:2019 inside the container and is used by the compose healthcheck;
@@ -94,9 +95,6 @@ comfy.{$BASE_DOMAIN:homeserve.lan} {
 	reverse_proxy comfyui:8188
 }
 
-# Grafana still requires its own login on top of SSO (AuthProxy header auth
-# is available upstream but intentionally left off; GF_SECURITY admin
-# credentials from secrets/grafana.env remain the way in).
 grafana.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
 	import sso
@@ -113,6 +111,26 @@ prom.{$BASE_DOMAIN:homeserve.lan} {
 	tls internal
 	import sso
 	reverse_proxy prometheus:9090
+}
+
+# Optional apps (apps/ overlays). These routes answer 502 until the
+# corresponding overlay is started — see docs/APPS.md.
+jellyfin.{$BASE_DOMAIN:homeserve.lan} {
+	tls internal
+	import sso
+	reverse_proxy jellyfin:8096
+}
+
+immich.{$BASE_DOMAIN:homeserve.lan} {
+	tls internal
+	import sso
+	reverse_proxy immich-server:2283
+}
+
+cloud.{$BASE_DOMAIN:homeserve.lan} {
+	tls internal
+	import sso
+	reverse_proxy nextcloud:80
 }
 
 # Machine-to-machine API with its own bearer-key auth: NOT behind SSO (see
