@@ -1,90 +1,83 @@
-# Service map
+# Service Map — `homeserv` (`ai-node`)
 
-LAN address: `192.168.1.68`  
-Tailscale address: `100.65.105.46`
+- **LAN Address:** `192.168.0.148`
+- **Tailscale Address:** `100.65.105.46`
+- **GPU:** NVIDIA GeForce RTX 5060 Laptop GPU (`8151 MiB` VRAM, Driver `595.99.02`)
 
-## Front door (Caddy proxy)
+---
 
-Caddy publishes `443` only on both addresses — port 80 belongs to a
-preserved system httpd, so no http→https redirect exists; use the
-`https://` URLs below directly. It serves every UI on a subdomain of
-`BASE_DOMAIN` (default `homeserve.lan`) with automatic internal TLS. See
-`config/caddy/Caddyfile` for DNS and CA-trust setup. The per-service ports
-below remain published as legacy direct access (Open WebUI and Grafana
-publish none — they are proxy-only). Authelia single sign-on (Caddy
-`forward_auth`) is installed in front of all subdomains except `gateway.`
-and `ntfy.`, but its ACLs bypass all of `homeserve.lan` by default
-(trusted-LAN model), so no login is required; turning SSO on is documented
-in `config/authelia/configuration.yml`.
+## 1. Front Door (`edge-caddy` HTTPS Reverse Proxy)
 
-| URL | Service |
-|---|---|
-| `https://auth.homeserve.lan` | Authelia SSO portal (login page) |
-| `https://lldap.homeserve.lan` | LLDAP user management (behind SSO) |
-| `https://homeserve.lan` | Landing dashboard (static, from `services/dashboard/`) |
-| `https://webui.homeserve.lan` | Open WebUI |
-| `https://comfy.homeserve.lan` | ComfyUI |
-| `https://grafana.homeserve.lan` | Grafana |
-| `https://kuma.homeserve.lan` | Uptime Kuma |
-| `https://prom.homeserve.lan` | Prometheus |
-| `https://gateway.homeserve.lan` | Agent Gateway (API, bearer-key auth, no SSO) |
-| `https://ntfy.homeserve.lan` | ntfy (no SSO; phone-app webhooks) |
+Caddy (`caddy:2.11.4-alpine`) publishes TCP/UDP `443` on both `192.168.0.148` and `100.65.105.46` and serves all web UIs on subdomains of `BASE_DOMAIN` (default `homeserve.lan`) with automatic internal TLS. See `config/caddy/Caddyfile` for DNS and client CA-trust setup.
 
-## Services and legacy ports
+Authelia (`auth-authelia`) enforces `one_factor` SSO on `https://webui.homeserve.lan` and defaults to `bypass` on the remaining trusted-LAN subdomains (`config/authelia/configuration.yml`).
 
-| Service | Purpose | Container | Port | LAN URL | Tailscale URL | Persistent Data | GPU | Health Check |
-|---|---|---|---:|---|---|---|---|---|
-| Caddy | Edge proxy, internal TLS, landing dashboard | `edge-caddy` | 443 | `https://192.168.1.68` | `https://100.65.105.46` | `/srv/ai-node/data/caddy` | No | admin API `:2019` internally; no `:80` (system httpd owns it) |
-| Ollama | LLM inference API | `ai-ollama` | 11434 | `http://192.168.1.68:11434` | `http://100.65.105.46:11434` | `/srv/models/ollama` | Yes | `/api/tags` |
-| Open WebUI | Ollama chat UI | `ai-open-webui` | — (proxy only) | `https://webui.homeserve.lan` | `https://webui.homeserve.lan` | `/srv/ai-node/data/open-webui` | Via Ollama | `/health` |
-| Embeddings | MiniLM OpenAI-compatible embeddings | `ai-embeddings` | 8081 | `http://192.168.1.68:8081` | `http://100.65.105.46:8081` | `/srv/models/embeddings` | No (CPU) | `/health` |
-| ComfyUI | Image workflow UI/API | `ai-comfyui` | 8188 | `http://192.168.1.68:8188` | `http://100.65.105.46:8188` | `/srv/models/comfyui`, `/srv/ai-node/data/comfyui` | Yes | `/system_stats` |
-| Agent Gateway | Scoped tool API for agent jobs | `ai-agent-gateway` | 8090 | `http://192.168.1.68:8090` | `http://100.65.105.46:8090` | `/srv/ai-node/agent-platform` | No | `/health` |
-| GPU Scheduler | Cooperative GPU lease arbiter | `ai-gpu-scheduler` | 8077 (loopback only) | `http://127.0.0.1:8077` (host only) | Not exposed | None (in-memory) | No | `/state` |
-| Prometheus | Metrics and network-probe history | `monitor-prometheus` | 9091 | `http://192.168.1.68:9091` | `http://100.65.105.46:9091` | `/srv/ai-node/data/prometheus` | No | `/-/ready` |
-| Alertmanager | Alert routing to ntfy (internal only) | `monitor-alertmanager` | 9093 internal | Not exposed | Not exposed | `/srv/ai-node/data/alertmanager` | No | `/-/healthy` internally |
-| ntfy | Push notifications for alerts | `monitor-ntfy` | 2586 | `http://192.168.1.68:2586` | `http://100.65.105.46:2586` | `/srv/ai-node/data/ntfy` | No | `/v1/health` |
-| Grafana | Provisioned dashboards | `monitor-grafana` | — (proxy only) | `https://grafana.homeserve.lan` | `https://grafana.homeserve.lan` | `/srv/ai-node/data/grafana` | No | `/api/health` |
-| Node Exporter | Host metrics (internal only) | `monitor-node-exporter` | 9100 internal | Not exposed | Not exposed | None | No | `/metrics` internally |
-| NVIDIA Exporter | GPU utilization/VRAM/temp/power (internal only) | `monitor-nvidia-exporter` | 9400 internal | Not exposed | Not exposed | None | Yes | `/metrics` internally |
-| Blackbox Exporter | ICMP, DNS, and HTTP probes (internal only) | `monitor-blackbox` | 9115 internal | Not exposed | Not exposed | None | No | Prometheus targets |
-| Uptime Kuma | User-managed uptime UI | `monitor-uptime-kuma` | 3002 | `http://192.168.1.68:3002` | `http://100.65.105.46:3002` | `/srv/ai-node/data/uptime-kuma` | No | `/` |
-| Authelia | SSO portal for the Caddy front door (internal only) | `auth-authelia` | 9091 internal | Not exposed | Not exposed | `/srv/ai-node/data/authelia` | No | `/api/health` internally |
-| LLDAP | LDAP user backend for SSO (internal only) | `auth-lldap` | 17170, 3890 internal | Not exposed | Not exposed | `/srv/ai-node/data/lldap` | No | `/` internally |
-| Speedtest Tracker | Daily Internet performance history | `monitor-speedtest` | 8765 | `http://192.168.1.68:8765` | `http://100.65.105.46:8765` | `/srv/ai-node/data/speedtest` | No | `/` |
-| Playwright | Disposable browser verification | profile-only `dev-playwright-test` | None | Not exposed | Not exposed | Image/config only | No | `test.js` exit status |
+| Subdomain URL | Upstream Target | Access Policy | Description |
+|---|---|---|---|
+| `https://homeserve.lan` | Static (`services/dashboard/`) | `bypass` (LAN/Tailscale) | Landing dashboard with real-time service health dots |
+| `https://webui.homeserve.lan` | `ai-open-webui:8080` | `one_factor` (Authelia SSO) | Open WebUI (`v0.11.3`) chat & coding agent workspace |
+| `https://comfy.homeserve.lan` | `ai-comfyui:8188` | `bypass` (LAN/Tailscale) | ComfyUI node workflow studio & Site Host Hub |
+| `https://grafana.homeserve.lan` | `monitor-grafana:3000` | `bypass` (LAN/Tailscale) | Grafana (`13.2.1`) provisioned host, GPU & backup dashboards |
+| `https://kuma.homeserve.lan` | `monitor-uptime-kuma:3001` | `bypass` (LAN/Tailscale) | Uptime Kuma (`2.5.3`) synthetic monitor |
+| `https://prom.homeserve.lan` | `monitor-prometheus:9090` | `bypass` (LAN/Tailscale) | Prometheus (`v3.14.0`) query UI & alert evaluation |
+| `https://gateway.homeserve.lan` | `ai-agent-gateway:8090` | Bearer `X-Agent-Key` | Agent Gateway OpenAPI tool server |
+| `https://ntfy.homeserve.lan` | `monitor-ntfy:80` | Open topic pub/sub | Self-hosted ntfy (`v2.28.0`) push notifications |
+| `https://auth.homeserve.lan` | `auth-authelia:9091` | Public portal | Authelia (`4.39.22`) SSO login portal |
+| `https://lldap.homeserve.lan` | `auth-lldap:17170` | `bypass` / Admin login | LLDAP (`v0.6.3-alpine`) LDAP user management UI |
 
-Prometheus alert states are visible at `http://192.168.1.68:9091/alerts` (or
-`https://prom.homeserve.lan/alerts`). Alerts are delivered by Alertmanager to
-the self-hosted ntfy service: subscribe with the ntfy app or
-`curl -N http://192.168.1.68:2586/homeserve-alerts` (critical alerts also go
-to the `homeserve-alerts-critical` topic).
+---
 
-The pre-existing Nextcloud, Wekan, and Prometheus-snap workloads were preserved and are not managed by this Compose project.
+## 2. Core Docker Compose Services (`compose/ai-node.yml`)
 
-## Optional apps (`apps/` overlays)
+| Service | Container | Published Ports | LAN Endpoint | Tailscale Endpoint | Persistent Data | GPU | Health Check |
+|---|---|---|---|---|---|---|---|
+| **Caddy** | `edge-caddy` | `443/tcp`, `443/udp` | `https://192.168.0.148` | `https://100.65.105.46` | `/srv/ai-node/data/caddy` | No | Admin API `:2019` |
+| **Ollama** | `ai-ollama` | `11434` (loopback, LAN, TS) | `http://192.168.0.148:11434` | `http://100.65.105.46:11434` | `/srv/ai-node/data/ollama` | RTX 5060 | `ollama ps` / `/api/tags` |
+| **Open WebUI** | `ai-open-webui` | Proxy-only (`8080` internal) | `https://webui.homeserve.lan` | `https://webui.homeserve.lan` | `/srv/ai-node/data/open-webui` | Via Ollama | `/health` |
+| **Embeddings** | `ai-embeddings` | `8081 -> 8080` | `http://192.168.0.148:8081` | `http://100.65.105.46:8081` | Stateless (uses `ai-ollama` `all-minilm`) | Via Ollama | `/health` |
+| **ComfyUI** | `ai-comfyui` | `8188` | `http://192.168.0.148:8188` | `http://100.65.105.46:8188` | `/srv/ai-node/data/comfyui` | RTX 5060 (`6g` cap) | `/system_stats` |
+| **Agent Gateway** | `ai-agent-gateway` | `8090` | `http://192.168.0.148:8090` | `http://100.65.105.46:8090` | `/srv/ai-node/agent-platform` | No | `/health` |
+| **Agent Shell** | `ai-agent-shell` | `8091` internal (`agent-exec`) | Internal only | Internal only | `/srv/ai-node/agent-platform/{workspaces,cache}` | No | `/health` |
+| **Agent Host** | `ai-agent-host` | `8092` internal (`agent-host`) | Internal only | Internal only | Host `/` (`rshared`) via `nsenter` | No | `/health` |
+| **GPU Scheduler** | `ai-gpu-scheduler` | `127.0.0.1:8077` | Loopback only | Not exposed | In-memory lease table | No | `/state` |
+| **Prometheus** | `monitor-prometheus` | `9091 -> 9090` | `http://192.168.0.148:9091` | `http://100.65.105.46:9091` | `/srv/ai-node/data/prometheus` | No | `/-/ready` |
+| **Alertmanager** | `monitor-alertmanager` | `9093` internal | Internal only | Internal only | `/srv/ai-node/data/alertmanager` | No | `/-/healthy` |
+| **ntfy** | `monitor-ntfy` | `2586 -> 80` | `http://192.168.0.148:2586` | `http://100.65.105.46:2586` | `/srv/ai-node/data/ntfy` | No | `/v1/health` |
+| **Grafana** | `monitor-grafana` | Proxy-only (`3000` internal) | `https://grafana.homeserve.lan` | `https://grafana.homeserve.lan` | `/srv/ai-node/data/grafana` | No | `/api/health` |
+| **Uptime Kuma** | `monitor-uptime-kuma` | `3002 -> 3001` | `http://192.168.0.148:3002` | `http://100.65.105.46:3002` | `/srv/ai-node/data/uptime-kuma` | No | `/api/entry-page` |
+| **Speedtest** | `monitor-speedtest` | `8765 -> 80` | `http://192.168.0.148:8765` | `http://100.65.105.46:8765` | `/srv/ai-node/data/speedtest` | No | `/api/healthcheck` |
+| **Node Exporter** | `monitor-node-exporter` | `9100` internal | Internal only | Internal only | Host `/proc`, `/sys`, textfile collector | No | `/metrics` |
+| **NVIDIA Exporter** | `monitor-nvidia-exporter` | `9400` internal | Internal only | Internal only | None (`nvidia-smi` telemetry) | Yes | `/metrics` |
+| **Blackbox Exporter** | `monitor-blackbox` | `9115` internal | Internal only | Internal only | None | No | `/-/healthy` |
+| **Authelia** | `auth-authelia` | `9091` internal | Internal only | Internal only | `/srv/ai-node/data/authelia` | No | `/api/health` |
+| **LLDAP** | `auth-lldap` | `17170`, `3890` internal | Internal only | Internal only | `/srv/ai-node/data/lldap` | No | `/` |
 
-Curated, opt-in compose overlays — **not installed or started by default**,
-and nothing in the base stack depends on them. Enable one by merging its file
-into the compose command (see [docs/APPS.md](docs/APPS.md)):
+---
 
-```bash
-docker compose --env-file .env -f compose/ai-node.yml -f apps/jellyfin.yml up -d
-```
+## 3. Host User Systemd Daemons & Companion Containers
 
-Each overlay carries the full `homeserv.*` label contract, so Prometheus
-probes, health checks, and backup pauses pick it up automatically once it
-runs; the dashboard tile is a manual entry in
-`services/dashboard/index.html`. The Caddy subdomain routes already exist
-in `config/caddy/Caddyfile` — they answer 502 until the overlay runs
-(see docs/APPS.md).
+Managed under `dima` user systemd (`systemctl --user`) and monitored every 15 minutes by `macmini-ops` fleet watchdog:
 
-| App | Purpose | Overlay | Port | LAN URL | Subdomain (once routed) | Persistent Data |
+| Unit / Container | Type | Working Directory / Image | Purpose |
+|---|---|---|---|
+| `homeserv-agent-fleet.service` | User systemd service | `/srv/ai-node/services/agent-fleet` | Runs `fleet_supervisor.py` (3 Marketing, 3 Maintenance, 3 Cleanup agents + RTX 5060 GPU render queue) |
+| `para-enterprise.service` | User systemd service | `/home/dima/services/enterprise` | Autonomous SEO/GEO, backlink & revenue governance daemon |
+| `answered.service` | User systemd service | `/home/dima/services/answered` | Answered autonomous worker daemon |
+| `gighound-growth.service` | User systemd service | `/home/dima/gighound/growth` | GigHound contract acquisition & growth daemon (`--interval 900`) |
+| `para-commander.timer` | User systemd timer | `/home/dima/services/enterprise` | Periodic Para Commander orchestration |
+| `para-agent-a0.timer` | User systemd timer | `/home/dima/services/enterprise` | Periodic Agent A0 health & funnel sweep |
+| `para-fleet-sync.timer` | User systemd timer | `/home/dima/services/enterprise` | Periodic multi-node state sync |
+| `steward-steward-1` | Docker container | `steward-steward` | Steward background worker container |
+| `sentinel-*` (`api`, `worker`, `watchdog`, `inference`, `nginx`, `redis`) | Docker Compose stack | `sentinel-core:2.3.0` | Sentinel core API (`:8000`) & TLS proxy (`:8443`) |
+
+---
+
+## 4. Optional Compose Overlays (`apps/`)
+
+Opt-in Compose overlays (not started by default; enable via `docker compose --env-file .env -f compose/ai-node.yml -f apps/<name>.yml up -d`):
+
+| App | Purpose | Overlay File | Legacy Port | LAN URL | Subdomain | Persistent Data |
 |---|---|---|---:|---|---|---|
-| Jellyfin | Media streaming | `apps/jellyfin.yml` | 8096 | `http://192.168.1.68:8096` | `https://jellyfin.homeserve.lan` | `/srv/ai-node/data/jellyfin`, media read-only from `MEDIA_ROOT` |
-| Immich | Photo & video backup | `apps/immich.yml` | 2283 | `http://192.168.1.68:2283` | `https://immich.homeserve.lan` | `/srv/ai-node/data/immich` |
-| Nextcloud | Files, calendar, contacts | `apps/nextcloud.yml` | 8480 | `http://192.168.1.68:8480` | `https://cloud.homeserve.lan` | `/srv/ai-node/data/nextcloud` |
-
-Combined memory caps of all three apps are ~10 GiB on a 16 GB host already
-running the base stack — see the resource warning in docs/APPS.md before
-enabling all three at once.
+| **Jellyfin** | Media server | `apps/jellyfin.yml` | `8096` | `http://192.168.0.148:8096` | `https://jellyfin.homeserve.lan` | `/srv/ai-node/data/jellyfin` |
+| **Immich** | Photo & video backup | `apps/immich.yml` | `2283` | `http://192.168.0.148:2283` | `https://immich.homeserve.lan` | `/srv/ai-node/data/immich` |
+| **Nextcloud** | Files, calendar, contacts | `apps/nextcloud.yml` | `8480` | `http://192.168.0.148:8480` | `https://cloud.homeserve.lan` | `/srv/ai-node/data/nextcloud` |

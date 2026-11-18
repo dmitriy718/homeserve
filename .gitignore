@@ -32,3 +32,5 @@ services/dashboard/services.json
 
 # Opt-in flag for scheduled stack updates
 .auto-update
+*.bak*
+scratch/

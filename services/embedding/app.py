@@ -1,32 +1,26 @@
 import os
+import json
 from contextlib import asynccontextmanager
 from typing import List, Union
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+import json
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
 
-MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-MODEL_CACHE = os.getenv("MODEL_CACHE", "/models")
+MODEL_NAME = os.getenv("EMBEDDING_MODEL", "all-minilm")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434").rstrip("/")
 MAX_INPUTS = int(os.getenv("MAX_EMBEDDING_INPUTS", "64"))
 MAX_CHARS = int(os.getenv("MAX_EMBEDDING_CHARS", "50000"))
-model = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global model
-    model = SentenceTransformer(MODEL_NAME, device="cpu", cache_folder=MODEL_CACHE)
     yield
 
 
 app = FastAPI(title="AI Node Embeddings", version="1.1.0", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-
-
-def loaded_model():
-    if model is None:
-        raise HTTPException(status_code=503, detail="embedding model is not loaded")
-    return model
 
 
 class EmbeddingRequest(BaseModel):
@@ -36,13 +30,19 @@ class EmbeddingRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    active_model = loaded_model()
-    return {"status": "ok", "model": MODEL_NAME, "dimensions": active_model.get_sentence_embedding_dimension()}
+    try:
+        with urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=5) as response:
+            models = json.load(response).get("models", [])
+    except (OSError, URLError):
+        raise HTTPException(status_code=503, detail="laptop Ollama is unavailable")
+    if not any(item.get("name", "").split(":")[0] == MODEL_NAME.split(":")[0] for item in models):
+        raise HTTPException(status_code=503, detail=f"{MODEL_NAME} is not available on laptop Ollama")
+    return {"status": "ok", "model": MODEL_NAME, "backend": OLLAMA_BASE_URL}
 
 
 @app.get("/v1/models")
 def models():
-    return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "local"}]}
+    return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model", "owned_by": "aidev"}]}
 
 
 @app.post("/v1/embeddings")
@@ -56,7 +56,13 @@ def embeddings(request: EmbeddingRequest):
         raise HTTPException(status_code=413, detail=f"at most {MAX_INPUTS} inputs are allowed")
     if sum(len(text) for text in texts) > MAX_CHARS:
         raise HTTPException(status_code=413, detail=f"input exceeds {MAX_CHARS} total characters")
-    vectors = loaded_model().encode(texts, normalize_embeddings=True).tolist()
+    payload = json.dumps({"model": MODEL_NAME, "input": texts}).encode()
+    request = Request(f"{OLLAMA_BASE_URL}/api/embed", data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=180) as response:
+            vectors = json.load(response)["embeddings"]
+    except URLError as error:
+        raise HTTPException(status_code=502, detail=f"laptop Ollama embedding request failed: {error.reason}")
     data = [{"object": "embedding", "index": i, "embedding": vector} for i, vector in enumerate(vectors)]
     token_estimate = sum(max(1, len(text.split())) for text in texts)
     return {

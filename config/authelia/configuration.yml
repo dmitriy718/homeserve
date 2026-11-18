@@ -45,21 +45,9 @@ authentication_backend:
 access_control:
   default_policy: deny
   rules:
-    # AUTHENTICATION IS OFF BY DEFAULT (bypass): every UI on the base domain
-    # is reachable without a login, matching the trusted-LAN model. The
-    # Authelia portal stays up so enabling SSO later is a config flip, not an
-    # install.
-    #
-    # To turn SSO on:
-    #   1. Change the two `bypass` policies below to `one_factor`
-    #      (or `two_factor` after users enrol TOTP in the portal).
-    #   2. In compose/ai-node.yml, flip the auth blocks for open-webui
-    #      (WEBUI_AUTH "True" + trusted header lines) and grafana
-    #      (GF_AUTH_PROXY_* lines, anonymous off) — each has a commented
-    #      enable-path — and uptime-kuma (delete the disableAuth row from
-    #      /srv/ai-node/data/uptime-kuma/kuma.db and restart
-    #      monitor-uptime-kuma; scripts/disable-app-auth.sh is the inverse).
-    #   3. Recreate: docker compose up -d authelia open-webui grafana uptime-kuma
+    # Open WebUI SSO; other services keep their existing access policies.
+    - domain: webui.homeserve.lan
+      policy: one_factor
     - domain: auth.homeserve.lan
       policy: bypass
     - domain: homeserve.lan

@@ -117,6 +117,10 @@ if ! tar --zstd --acls --xattrs -cpf "$partial" \
   --exclude='ai-node/logs' \
   --exclude='ai-node/agent-platform/cache' \
   --exclude='ai-node/backups' \
+  --exclude='ai-node/data/backups' \
+  --exclude='ai-node/data/ollama/models' \
+  --exclude='ai-node/data/comfyui/models' \
+  --exclude='ai-node/data/comfyui/cache' \
   -C /srv ai-node repos; then
   exit 1
 fi
@@ -162,8 +166,8 @@ else
   echo "WARNING: backup succeeded but creating its Prometheus metric failed" >&2
 fi
 
-# Retention: expire archives older than 14 days, but always keep the newest 3.
-cutoff=$(( $(date +%s) - 14 * 86400 ))
+# Retention: expire archives older than 7 days, but always keep the newest 3.
+cutoff=$(( $(date +%s) - 7 * 86400 ))
 index=0
 while IFS= read -r old_archive; do
   index=$((index + 1))

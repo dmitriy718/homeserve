@@ -1,6 +1,6 @@
 FROM pytorch/pytorch:2.9.1-cuda13.0-cudnn9-runtime
 
-ARG COMFYUI_TAG=v0.31.0
+ARG COMFYUI_TAG=v0.34.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \

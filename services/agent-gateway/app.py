@@ -8,6 +8,7 @@ below, so children that ever inherit this process environment cannot see it.
 """
 import hashlib, hmac, os, signal, stat, subprocess, tempfile, threading, time, json, socket, ssl
 import asyncio
+import urllib.error
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from pathlib import Path
@@ -69,6 +70,14 @@ def safe(rel: str) -> Path:
     if p != ROOT and ROOT not in p.parents: raise HTTPException(400, "path outside workspace root")
     return p
 
+def ensure_workspace_dirs(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+    current = path
+    while current == ROOT or ROOT in current.parents:
+        current.chmod(current.stat().st_mode | 0o2070)
+        if current == ROOT: break
+        current = current.parent
+
 def open_nofollow(p: Path, flags: int):
     # Open an already-resolved path without following a swapped-in final symlink
     # (O_NOFOLLOW), closing the check-to-use race on the last component after safe().
@@ -85,7 +94,11 @@ class WriteReq(PathReq):
 class ShellReq(BaseModel):
     command: str
     project: str = "default"
-    timeout_seconds: int = Field(120, ge=1, le=3600)
+    timeout_seconds: int = Field(120, ge=1, le=14400)
+class HostShellReq(BaseModel):
+    command: str
+    cwd: str = "/home/dima"
+    timeout_seconds: int = Field(120, ge=1, le=14400)
 
 @app.get("/health", operation_id="agent_health")
 async def health(): return {"status":"ok"}
@@ -96,7 +109,7 @@ def openapi_schema(x_agent_key: Optional[str] = Header(None), authorization: Opt
 
 @app.get("/tools", operation_id="list_agent_tools")
 def tools(x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    auth(x_agent_key, authorization); return {"tools":["fs_list","fs_read","fs_write","fs_mkdir","fs_delete","fs_hash","shell_exec","http_security_check","tcp_probe","dns_lookup","tls_certificate"]}
+    auth(x_agent_key, authorization); return {"tools":["fs_list","fs_read","fs_write","fs_mkdir","fs_delete","fs_hash","shell_exec","host_exec","http_security_check","tcp_probe","dns_lookup","tls_certificate"]}
 
 SERVICE_CHECKS = {
     "ollama": "http://ollama:11434/api/tags",
@@ -196,7 +209,7 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
     encoded = content.encode()
     if len(req.content) > MAX_WRITE_CHARS or len(encoded) > MAX_WRITE_CHARS:
         raise HTTPException(413, "resulting file exceeds the 5,000,000-byte limit")
-    p.parent.mkdir(parents=True,exist_ok=True)
+    ensure_workspace_dirs(p.parent)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{p.name}.", dir=p.parent)
     temporary = Path(temporary_name)
     try:
@@ -204,6 +217,7 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
             output.write(encoded)
             output.flush()
             os.fsync(output.fileno())
+        os.chmod(temporary, 0o664)
         # Re-canonicalize the parent right before the rename and pin the rename to
         # it via dirfd, so a same-UID process swapping a path component between
         # safe() and here cannot redirect the write (rename replaces a symlinked
@@ -222,7 +236,7 @@ def fs_write(req: WriteReq, x_agent_key: Optional[str] = Header(None), authoriza
 
 @app.post("/fs/mkdir", operation_id="fs_mkdir")
 def fs_mkdir(req: PathReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    auth(x_agent_key, authorization); audit("fs_mkdir", {"path":req.path}); p=safe(req.path); p.mkdir(parents=True,exist_ok=True); return {"path":req.path,"created":True}
+    auth(x_agent_key, authorization); audit("fs_mkdir", {"path":req.path}); p=safe(req.path); ensure_workspace_dirs(p); return {"path":req.path,"created":True}
 
 @app.delete("/fs/delete", operation_id="fs_delete")
 def fs_delete(path: str, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
@@ -250,35 +264,33 @@ def shell_exec(req: ShellReq, x_agent_key: Optional[str] = Header(None), authori
     if len(req.command) > MAX_COMMAND_CHARS: raise HTTPException(413, "command exceeds 20,000 characters")
     if not SHELL_SLOTS.acquire(blocking=False): raise HTTPException(429, "too many concurrent shell executions")
     try:
-        audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); wd.mkdir(parents=True,exist_ok=True)
-        started=time.time()
-        shell_env = {
-            "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            "HOME": "/srv/agent-cache",
-            "TMPDIR": "/tmp",
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-            "AGENT_PROJECT": req.project,
-        }
-        # Stream stdout/stderr into temp files and keep only the trailing 20KB,
-        # so a runaway command cannot fill memory before the response truncates.
-        with tempfile.TemporaryFile() as out_file, tempfile.TemporaryFile() as err_file:
-            process=subprocess.Popen(["bash","-lc",req.command],cwd=wd,stdout=out_file,stderr=err_file,env=shell_env,start_new_session=True)
-            timed_out=False
-            try: process.wait(timeout=req.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out=True
-                try: os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError: pass
-                try: process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try: os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError: pass
-                    process.wait()
-            result={"project":req.project,"command":req.command,"exit_code":124 if timed_out else process.returncode,"stdout":_tail(out_file),"stderr":_tail(err_file),"duration_seconds":round(time.time()-started,3)}
-            if timed_out: result["timed_out"]=True
-            return result
+        audit("shell_exec", {"project": req.project, "command_length": len(req.command)}); wd=safe(req.project); ensure_workspace_dirs(wd)
+        payload=json.dumps({"project":req.project,"command":req.command,"timeout_seconds":req.timeout_seconds}).encode()
+        request=Request("http://agent-shell:8091/exec",data=payload,headers={"Content-Type":"application/json"},method="POST")
+        try:
+            with urlopen(request,timeout=req.timeout_seconds + 15) as response: return json.loads(response.read())
+        except Exception as error:
+            raise HTTPException(502, f"isolated shell worker failed: {type(error).__name__}") from None
     finally: SHELL_SLOTS.release()
+
+@app.post(
+    "/host/exec",
+    operation_id="host_exec",
+    summary="Run a command on Homeserv",
+    description="Runs a shell command as root on Homeserv. For the Windows AIDEV laptop, use `ssh -i /home/dima/.ssh/homeserv-aidev-agents -o IdentitiesOnly=yes dmitr@aidev powershell.exe -NoProfile -Command ...`; the Windows Desktop is `C:\\Users\\dmitr\\Desktop`.",
+)
+def host_exec(req: HostShellReq, x_agent_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
+    auth(x_agent_key, authorization)
+    if len(req.command) > MAX_COMMAND_CHARS: raise HTTPException(413, "command exceeds 20,000 characters")
+    audit("host_exec", {"cwd": req.cwd, "command_length": len(req.command), "command_sha256": hashlib.sha256(req.command.encode()).hexdigest()})
+    payload=json.dumps(req.model_dump()).encode()
+    request=Request("http://agent-host:8092/exec",data=payload,headers={"Content-Type":"application/json"},method="POST")
+    try:
+        with urlopen(request,timeout=req.timeout_seconds + 15) as response: return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        raise HTTPException(error.code, error.read().decode("utf-8", errors="replace")) from None
+    except Exception as error:
+        raise HTTPException(502, f"host worker failed: {type(error).__name__}") from None
 
 def _tail(f, limit=20000):
     f.seek(0, os.SEEK_END)

@@ -16,33 +16,31 @@ x-common: &common
 services:
   ollama:
     <<: *common
-    image: ollama/ollama:0.32.6
+    image: ollama/ollama:latest
     container_name: ai-ollama
-    # App manifest labels — see docs/APP_MANIFEST.md. Everything downstream
-    # (probes, dashboard tiles, health checks, backup pauses) derives from these.
     labels:
-      homeserv.name: "Ollama"
-      homeserv.purpose: "LLM inference API"
-      homeserv.legacy.port: "11434"
+      homeserv.name: "Ollama (local GPU inference)"
+      homeserv.purpose: "Local Ollama on RTX 5060"
       homeserv.probe.url: "http://ollama:11434/api/tags"
-    gpus: all
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
-      OLLAMA_KEEP_ALIVE: 5m
-      OLLAMA_FLASH_ATTENTION: "1"
-    volumes:
-      - /srv/models/ollama:/root/.ollama
-    # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
+      - "127.0.0.1:11434:11434"
       - "${LAN_IP}:11434:11434"
       - "${TAILSCALE_IP}:11434:11434"
+    volumes:
+      - /srv/ai-node/data/ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: ["CMD", "ollama", "ps"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 20s
-    mem_limit: 8g
+      start_period: 60s
     networks: [ai, scrape]
 
   agent-gateway:
@@ -69,6 +67,9 @@ services:
       AGENT_GATEWAY_KEY_FILE: /run/secrets/agent_gateway_key
     secrets:
       - agent_gateway_key
+    depends_on:
+      agent-shell:
+        condition: service_healthy
     volumes:
       - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
       - /srv/ai-node/agent-platform/artifacts:/srv/agent-artifacts
@@ -84,11 +85,58 @@ services:
       retries: 5
     mem_limit: 512m
     cpus: 2
-    networks: [ai, scrape]
+    networks: [ai, scrape, agent-exec, agent-host]
+
+  agent-shell:
+    build:
+      context: ../services/agent-gateway
+      dockerfile: Dockerfile.shell
+    image: local/ai-node-agent-shell:1.0
+    container_name: ai-agent-shell
+    user: "10001:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    volumes:
+      - /srv/ai-node/agent-platform/workspaces:/srv/agent-workspaces
+      - /srv/ai-node/agent-platform/cache:/srv/agent-cache
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    mem_limit: 2g
+    cpus: 4
+    pids_limit: 256
+    networks: [agent-exec]
+
+  agent-host:
+    build:
+      context: ../services/agent-gateway
+      dockerfile: Dockerfile.host
+    image: local/ai-node-agent-host:1.0
+    container_name: ai-agent-host
+    privileged: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    volumes:
+      - /:/host:rshared
+      - /run:/host/run:rshared
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    cpus: 4
+    networks: [agent-host]
 
   open-webui:
     <<: *common
-    image: ghcr.io/open-webui/open-webui:v0.11.0
+    image: ghcr.io/open-webui/open-webui:v0.11.3
     container_name: ai-open-webui
     labels:
       homeserv.name: "Open WebUI"
@@ -101,18 +149,18 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_BASE_URL: http://ollama:11434
-      # Auth OFF by default (trusted LAN): anyone on the network gets full
-      # admin access, no login. To enable login: set WEBUI_AUTH "True",
-      # uncomment the trusted-header lines below, and flip the Authelia ACLs
-      # in config/authelia/configuration.yml (its header documents all three
-      # steps). With trusted headers on, the first SSO user becomes admin.
-      WEBUI_AUTH: "False"
+      WEBUI_AUTH: "True"
       ENABLE_SIGNUP: "False"
-      # WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "Remote-Email"
-      # WEBUI_AUTH_TRUSTED_NAME_HEADER: "Remote-Name"
+      WEBUI_AUTH_TRUSTED_EMAIL_HEADER: "Remote-Email"
+      WEBUI_AUTH_TRUSTED_NAME_HEADER: "Remote-Name"
+      ENABLE_TOOL_PERMISSIONS: "True"
       ENABLE_OPENAI_API: "False"
       ENABLE_OLLAMA_API: "True"
-      DEFAULT_MODEL_PARAMS: "{\"function_calling\":\"native\"}"
+      DEFAULT_MODELS: "Qwen3.8:latest"
+      RAG_EMBEDDING_ENGINE: ollama
+      RAG_EMBEDDING_MODEL: all-minilm
+      RAG_OLLAMA_BASE_URL: http://ollama:11434
+      DEFAULT_MODEL_PARAMS: "{\"function_calling\":\"native\",\"tool_approval_mode\":\"ask\"}"
       WEBUI_NAME: homeserv AI
     volumes:
       - /srv/ai-node/data/open-webui:/app/backend/data
@@ -141,13 +189,10 @@ services:
       homeserv.legacy.port: "8081"
       homeserv.probe.url: "http://embeddings:8080/health"
     environment:
-      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
-      MODEL_CACHE: /models
-      OMP_NUM_THREADS: "4"
+      EMBEDDING_MODEL: all-minilm
+      OLLAMA_BASE_URL: http://ollama:11434
       MAX_EMBEDDING_INPUTS: "64"
       MAX_EMBEDDING_CHARS: "50000"
-    volumes:
-      - /srv/models/embeddings:/models
     # Legacy direct access; the Caddy proxy is the front door for UIs.
     ports:
       - "${LAN_IP}:8081:8080"
@@ -163,40 +208,41 @@ services:
     networks: [ai, scrape]
 
   comfyui:
+    mem_limit: 6g
+    memswap_limit: 6g
     <<: *common
-    build:
-      context: ../services/comfyui
-      args:
-        COMFYUI_TAG: v0.31.0
-    image: local/ai-node-comfyui:0.31.0
+    image: yanwk/comfyui-boot:cu130-slim-v2
     container_name: ai-comfyui
     labels:
       homeserv.name: "ComfyUI"
-      homeserv.purpose: "Image generation workflows"
+      homeserv.purpose: "Local ComfyUI on RTX 5060"
       homeserv.subdomain: "comfy"
-      homeserv.legacy.port: "8188"
       homeserv.probe.url: "http://comfyui:8188/system_stats"
-      homeserv.backup.pause: "true"
-    gpus: all
     environment:
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
-    volumes:
-      - /srv/models/comfyui:/opt/ComfyUI/models
-      - /srv/ai-node/data/comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
-      - /srv/ai-node/data/comfyui/input:/opt/ComfyUI/input
-      - /srv/ai-node/data/comfyui/output:/opt/ComfyUI/output
-      - /srv/ai-node/data/comfyui/user:/opt/ComfyUI/user
-    # Legacy direct access; the Caddy proxy is the front door for UIs.
+      CLI_ARGS: "--listen 0.0.0.0 --port 8188"
     ports:
       - "${LAN_IP}:8188:8188"
       - "${TAILSCALE_IP}:8188:8188"
+    volumes:
+      - /srv/ai-node/data/comfyui/models:/root/ComfyUI/models
+      - /srv/ai-node/data/comfyui/custom_nodes:/root/ComfyUI/custom_nodes
+      - /srv/ai-node/data/comfyui/input:/root/ComfyUI/input
+      - /srv/ai-node/data/comfyui/output:/root/ComfyUI/output
+      - /srv/ai-node/data/comfyui/user:/root/ComfyUI/user
+      - /srv/ai-node/data/comfyui/cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats', timeout=5)"]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats')\""]
       interval: 30s
       timeout: 10s
-      retries: 10
-      start_period: 120s
-    mem_limit: 8g
+      retries: 5
+      start_period: 180s
     networks: [ai, scrape]
 
   gpu-scheduler:
@@ -232,7 +278,7 @@ services:
 
   prometheus:
     <<: *common
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:v3.14.0
     container_name: monitor-prometheus
     labels:
       homeserv.name: "Prometheus"
@@ -268,7 +314,7 @@ services:
 
   alertmanager:
     <<: *common
-    image: prom/alertmanager:v0.29.0
+    image: prom/alertmanager:v0.34.0
     container_name: monitor-alertmanager
     labels:
       homeserv.name: "Alertmanager"
@@ -291,7 +337,7 @@ services:
 
   ntfy:
     <<: *common
-    image: binwiederhier/ntfy:v2.14.0
+    image: binwiederhier/ntfy:v2.28.0
     container_name: monitor-ntfy
     labels:
       homeserv.name: "ntfy"
@@ -324,7 +370,7 @@ services:
 
   grafana:
     <<: *common
-    image: grafana/grafana:13.1.3
+    image: grafana/grafana:13.2.1
     container_name: monitor-grafana
     labels:
       homeserv.name: "Grafana"
@@ -431,7 +477,7 @@ services:
 
   uptime-kuma:
     <<: *common
-    image: louislam/uptime-kuma:2.5.0
+    image: louislam/uptime-kuma:2.5.3
     container_name: monitor-uptime-kuma
     labels:
       homeserv.name: "Uptime Kuma"
@@ -463,7 +509,7 @@ services:
 
   speedtest-tracker:
     <<: *common
-    image: lscr.io/linuxserver/speedtest-tracker:1.14.7
+    image: lscr.io/linuxserver/speedtest-tracker:1.15.0
     container_name: monitor-speedtest
     labels:
       homeserv.name: "Speedtest"
@@ -534,7 +580,7 @@ services:
 
   authelia:
     <<: *common
-    image: authelia/authelia:4.39.20
+    image: authelia/authelia:4.39.22
     container_name: auth-authelia
     labels:
       homeserv.name: "Authelia SSO"
@@ -572,7 +618,7 @@ services:
 
   caddy:
     <<: *common
-    image: caddy:2.10.2-alpine
+    image: caddy:2.11.4-alpine
     container_name: edge-caddy
     labels:
       homeserv.name: "Caddy"
@@ -627,10 +673,18 @@ networks:
     name: ai-node-scrape
   dev:
     name: ai-node-dev
+  agent-exec:
+    name: ai-node-agent-exec
+  agent-host:
+    name: ai-node-agent-host
 
 secrets:
   agent_gateway_key:
     file: ../secrets/agent-gateway.key
+  ollama_tunnel_key:
+    file: ../secrets/ollama-tunnel.key
+  ollama_tunnel_known_hosts:
+    file: ../secrets/ollama-tunnel-known_hosts
   # Authelia session cookie secret (AUTHELIA_SESSION_SECRET_FILE).
   authelia_session_secret:
     file: ../secrets/authelia-session.secret

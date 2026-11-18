@@ -99,3 +99,9 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
+
+  - job_name: comfyui-fleet
+    metrics_path: /api/sites/metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["comfyui:8188"]

@@ -50,6 +50,10 @@ restic backup \
   --exclude='/srv/ai-node/data/node-exporter-textfile' \
   --exclude='/srv/ai-node/logs' \
   --exclude='/srv/ai-node/agent-platform/cache' \
+  --exclude='/srv/ai-node/data/backups' \
+  --exclude='/srv/ai-node/data/ollama/models' \
+  --exclude='/srv/ai-node/data/comfyui/models' \
+  --exclude='/srv/ai-node/data/comfyui/cache' \
   /srv/ai-node
 
 restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune

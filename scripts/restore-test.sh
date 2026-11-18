@@ -62,19 +62,22 @@ archive=$(find "$backup_dir" -maxdepth 1 -type f -name 'ai-node-*.tar.zst' -prin
   sha256sum -c "$(basename "$archive").sha256" >/dev/null
 )
 
-# Pre-flight: refuse to extract without room in /tmp for the archive
+# Pre-flight: refuse to extract without room in scratch_base for the archive
+# (/tmp on homeserv is a 7.1 GiB RAM tmpfs, so default to disk-backed /var/tmp).
 # (compressed size is a lower bound on the extracted size). Same formula as
 # scripts/backup.sh: 1.5x the archive size.
+scratch_base=${RESTORE_SCRATCH_DIR:-/var/tmp}
+install -d -m 1777 "$scratch_base" 2>/dev/null || [[ -d $scratch_base ]]
 archive_size=$(stat -c %s "$archive")
 required_free=$((archive_size + archive_size / 2))
-free_bytes=$(df -B1 --output=avail /tmp | awk 'NR==2 {print $1}')
+free_bytes=$(df -B1 --output=avail "$scratch_base" | awk 'NR==2 {print $1}')
 if [[ $free_bytes =~ ^[0-9]+$ ]] && ((free_bytes < required_free)); then
-  echo "Not enough free space in /tmp: $((free_bytes / 1024 / 1024 / 1024)) GiB available," \
+  echo "Not enough free space in $scratch_base: $((free_bytes / 1024 / 1024 / 1024)) GiB available," \
     "need at least $((required_free / 1024 / 1024 / 1024)) GiB" >&2
   exit 1
 fi
 
-scratch=$(mktemp -d /tmp/ai-node-restore-test.XXXXXX)
+scratch=$(mktemp -d "$scratch_base/ai-node-restore-test.XXXXXX")
 chmod 0700 "$scratch"
 if ! tar --zstd --acls --xattrs -xpf "$archive" -C "$scratch"; then
   echo "Restore test failed: could not extract $archive" >&2

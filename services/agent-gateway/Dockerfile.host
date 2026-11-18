@@ -1,0 +1,5 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY host-worker.py /app/host-worker.py
+EXPOSE 8092
+CMD ["python3", "/app/host-worker.py"]

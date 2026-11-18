@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -41,23 +40,24 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(app.fs_hash(relative, None, AUTHORIZATION)["sha256"], result["sha256"])
 
     def test_shell_environment_excludes_gateway_secret(self):
-        result = app.shell_exec(
-            app.ShellReq(command='printf "%s" "${AGENT_GATEWAY_KEY-unset}"', project=self.project),
-            None,
-            AUTHORIZATION,
-        )
-        self.assertEqual(result["exit_code"], 0)
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({"exit_code": 0, "stdout": "unset"}).encode()
+        with mock.patch.object(app, "urlopen", return_value=response) as request:
+            result = app.shell_exec(app.ShellReq(command="echo ok", project=self.project), None, AUTHORIZATION)
         self.assertEqual(result["stdout"], "unset")
+        payload = json.loads(request.call_args.args[0].data)
+        self.assertEqual(payload["project"], self.project)
+        self.assertNotIn(app.API_KEY, request.call_args.args[0].data.decode())
 
-    def test_timeout_terminates_descendant_process_group(self):
-        result = app.shell_exec(
-            app.ShellReq(command="(sleep 2; echo orphan > orphan.txt) & wait", project=self.project, timeout_seconds=1),
-            None,
-            AUTHORIZATION,
-        )
-        self.assertEqual(result["exit_code"], 124)
-        time.sleep(2)
-        self.assertFalse((Path(self.temp.name) / "orphan.txt").exists())
+    def test_shell_timeout_is_forwarded_to_isolated_worker(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({"exit_code": 0}).encode()
+        with mock.patch.object(app, "urlopen", return_value=response) as request:
+            app.shell_exec(app.ShellReq(command="true", project=self.project, timeout_seconds=14400), None, AUTHORIZATION)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["timeout_seconds"], 14400)
+
+    def test_shell_timeout_supports_extended_jobs(self):
+        self.assertEqual(app.ShellReq(command="true", timeout_seconds=14400).timeout_seconds, 14400)
 
     def test_audit_reader_skips_truncated_records(self):
         audit_path = app.ARTIFACTS / "agent-audit.jsonl"
